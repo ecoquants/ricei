@@ -1,5 +1,8 @@
 ---
 title: "Spatial analysis of ship strike risk for Rice’s whale in the Gulf of Mexico"
+author: Benjamin D. Best, Ph.D. (<ben@ecoquants.com>)
+date: now
+date-format: "YYYY-MM-DD HH:mm (z)"
 format:
   html:
     toc: true
@@ -7,6 +10,15 @@ format:
     number-depth: 3
     code-fold: true
     code-tools: true
+  docx:
+    toc: true
+    toc-depth: 3
+    toc-title: Contents
+    number-sections: true
+    code-annotations: false
+    execute:
+      echo: false
+      warning: false
 editor_options: 
   chunk_output_type: console
 ---
@@ -16,16 +28,24 @@ editor_options:
 
 # packages ----
 librarian::shelf(
-  dplyr, fs, geojsonsf, ggplot2, ggspatial, glue, here, janitor, leaflet, 
-  mapview, mregions, readr, readxl, sf,
+  dplyr, fs, geojsonsf, ggplot2, ggspatial, glue, here, janitor, leaflet, leaflet.extras, mapview, mregions, readr, readxl, sf,
   quiet = T)
 options(readr.show_col_types = F)
 
 # functions ---
-map_ply_val <- function(ply, title){
+map_ply_val <- function(
+    ply, 
+    label, legend,
+    zoomControl        = knitr::is_html_output(),
+    attributionControl = knitr::is_html_output(),
+    fullScreenControl  = knitr::is_html_output()){
   pal <- colorNumeric("Spectral", domain = ply$val, reverse = T)
   
-  leaflet(ply) |>
+  m <- leaflet(
+    ply,
+    options = leafletOptions(
+      zoomControl        = zoomControl,
+      attributionControl = attributionControl)) |>
     addProviderTiles(
       "Esri.OceanBasemap",
       options = providerTileOptions(
@@ -35,15 +55,22 @@ map_ply_val <- function(ply, title){
       options = providerTileOptions(
         variant = "Ocean/World_Ocean_Reference")) |> 
     addPolygons(
-      fillColor   = ~pal(val),
-      weight      = 0,
-      fillOpacity = 0.7) |> 
+      fillColor    = ~pal(val),
+      weight       = 0,
+      fillOpacity  = 0.7,
+      smoothFactor = 0,
+      label        = ~glue("{label}: {val}")) |> 
     addLegend(
       pal      = pal, 
       values   = ~val, 
       opacity  = 0.7, 
-      title    = title,
+      title    = legend,
       position = "topright")
+  
+  if (fullScreenControl)
+    m <- m |>
+      leaflet.extras::addFullscreenControl()
+  m
 }
 ```
 
@@ -194,7 +221,10 @@ ply <- ply_whales |>
         val = avg_n), 
     by = "hexid")
   
-map_ply_val(ply, "whales: n")
+map_ply_val(
+  ply, 
+  "whales",
+  "whales: n")
 ```
 
 ## Ship Traffic, all > 10 knots, average
@@ -211,7 +241,10 @@ ply <- ply_ships |>
         val = all_ihs_dist_km_sog_gt10), 
     by = "grdid")
   
-map_ply_val(ply, "ships: all > 10 knots")
+map_ply_val(
+  ply, 
+  "ships",
+  "ships: all > 10 knots")
 ```
 
 
@@ -237,23 +270,9 @@ ply <- ply_units |>
   mutate(
     val = whales_n * ships_all_gt10)
 map_ply_val(
-  ply, 
+  ply,
+  "risk",
   "risk: whales (n) * ships (all > 10 knots)")
 ```
-
-```{r}
-#| label: map_risk_static
-#| column: screen-inset-shaded
-
-# rosm::osm.types()
-ggplot() +
-  annotation_map_tile(type = "stamenbw", zoom = 8) +
-  layer_spatial(
-    data = ply, mapping = aes(fill = val), 
-    lwd = 0, color = NA) +
-  scale_fill_distiller(
-    palette = "Spectral", name = "Risk")
-```
-
 
 
