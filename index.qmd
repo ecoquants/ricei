@@ -16,7 +16,7 @@ editor_options:
 
 # packages ----
 librarian::shelf(
-  dplyr, fs, geojsonsf, glue, here, janitor, leaflet, 
+  dplyr, fs, geojsonsf, ggplot2, ggspatial, glue, here, janitor, leaflet, 
   mapview, mregions, readr, readxl, sf,
   quiet = T)
 options(readr.show_col_types = F)
@@ -184,6 +184,7 @@ tbl_whales    <- read_csv(whales_csv)
 
 ```{r}
 #| label: map_whale_avg
+#| column: screen-inset-shaded
 
 ply <- ply_whales |> 
   inner_join(
@@ -200,6 +201,7 @@ map_ply_val(ply, "whales: n")
 
 ```{r}
 #| label: map_ships_avg
+#| column: screen-inset-shaded
 
 ply <- ply_ships |> 
   inner_join(
@@ -217,7 +219,8 @@ map_ply_val(ply, "ships: all > 10 knots")
 
 ```{r}
 #| label: map_risk
-#| 
+#| column: screen-inset-shaded
+
 ply <- ply_units |> 
   left_join(
     tbl_whales |> 
@@ -237,4 +240,20 @@ map_ply_val(
   ply, 
   "risk: whales (n) * ships (all > 10 knots)")
 ```
+
+```{r}
+#| label: map_risk_static
+#| column: screen-inset-shaded
+
+# rosm::osm.types()
+ggplot() +
+  annotation_map_tile(type = "stamenbw", zoom = 8) +
+  layer_spatial(
+    data = ply, mapping = aes(fill = val), 
+    lwd = 0, color = NA) +
+  scale_fill_distiller(
+    palette = "Spectral", name = "Risk")
+```
+
+
 
