@@ -1,0 +1,240 @@
+---
+title: "Spatial analysis of ship strike risk for Rice’s whale in the Gulf of Mexico"
+format:
+  html:
+    toc: true
+    number-sections: true
+    number-depth: 3
+    code-fold: true
+    code-tools: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+#| label: setup
+
+# packages ----
+librarian::shelf(
+  dplyr, fs, geojsonsf, glue, here, janitor, leaflet, 
+  mapview, mregions, readr, readxl, sf,
+  quiet = T)
+options(readr.show_col_types = F)
+
+# functions ---
+map_ply_val <- function(ply, title){
+  pal <- colorNumeric("Spectral", domain = ply$val, reverse = T)
+  
+  leaflet(ply) |>
+    addProviderTiles(
+      "Esri.OceanBasemap",
+      options = providerTileOptions(
+        variant = "Ocean/World_Ocean_Base")) |>
+    addProviderTiles(
+      "Esri.OceanBasemap",
+      options = providerTileOptions(
+        variant = "Ocean/World_Ocean_Reference")) |> 
+    addPolygons(
+      fillColor   = ~pal(val),
+      weight      = 0,
+      fillOpacity = 0.7) |> 
+    addLegend(
+      pal      = pal, 
+      values   = ~val, 
+      opacity  = 0.7, 
+      title    = title,
+      position = "topright")
+}
+```
+
+
+## Background
+
+
+
+## Data
+
+```{r}
+#| label: prep
+
+# local paths ----
+
+# inputs
+ships_shp <- here("data/raw/ships/boem_gom_grid_pl_albers/boem_gom_grid_pl_albers.shp")
+ships_xls <- here("data/raw/ships/BOEM GoMex 2020 BiOp AIS Data for Rices Whale Risk Analysis.xlsx")
+whales_shp <- here("data/raw/whales/Rices_Whale_Monthly_Density.shp")
+
+# outputs
+study_geo      <- here("data/study.geojson")
+units_geo      <- here("data/units.geojson")
+ships_geo      <- here("data/ships.geojson")
+whales_geo     <- here("data/whales.geojson")
+ships_csv      <- here("data/ships.csv")
+ships_avg_csv  <- here("data/ships_avg.csv")
+whales_csv     <- here("data/whales.csv")
+
+# read data ----
+# transform all to geographic projection (4326)
+
+if (!all(file.exists(c(
+  study_geo, units_geo, ships_csv, whales_csv)))){
+  
+  # ships
+  grd_ships <- read_sf(ships_shp) |> 
+    st_transform(4326)
+  
+  # whales
+  hex_whales <- read_sf(whales_shp) |> 
+    st_transform(4326)
+  
+  # study area ----
+  # as intersection of all dissolved (st_union) inputs: whales, ships, eez
+  if (!file.exists(study_geo)){
+    # eez
+    us_eez <- mr_features_get(
+      type      = "MarineRegions:eez",
+      featureID = "eez.281")  |>
+      geojson_sf() |> 
+      st_transform(4326) # mapview(us_eez)
+    
+    # intersect all
+    ply_study <- st_union(grd_ships) |> 
+      st_intersection(
+        st_union(hex_whales)) |> 
+      st_intersection(
+        us_eez)
+    
+    # write geojson
+    write_sf(ply_study, study_geo)
+  }
+  ply_study <- read_sf(study_geo)
+  
+  # units: intersection of ships, whales, eez ----
+  if (!file.exists(units_geo)){
+    grd_ships |> write_sf(here("data/ships.gpkg"))
+    hex_whales |> write_sf(here("data/whales.gpkg"))
+    
+    # ran intersection in QGIS
+    stop("run intersection in QGIS manually")
+    # processing.run("native:intersection", {'INPUT':QgsProcessingFeatureSourceDefinition('/Users/bbest/Github/ecoquants/ricei/data/whales.gpkg|layername=whales', selectedFeaturesOnly=False, featureLimit=-1, flags=QgsProcessingFeatureSourceDefinition.FlagOverrideDefaultGeometryCheck, geometryCheck=QgsFeatureRequest.GeometryNoCheck),'OVERLAY':QgsProcessingFeatureSourceDefinition('/Users/bbest/Github/ecoquants/ricei/data/ships.gpkg|layername=ships', selectedFeaturesOnly=False, featureLimit=-1, flags=QgsProcessingFeatureSourceDefinition.FlagOverrideDefaultGeometryCheck, geometryCheck=QgsFeatureRequest.GeometryNoCheck),'INPUT_FIELDS':[],'OVERLAY_FIELDS':[],'OVERLAY_FIELDS_PREFIX':'','OUTPUT':'ogr:dbname=\'/Users/bbest/Github/ecoquants/ricei/data/ships_whales.gpkg\' table="ships_whales" (geom)','GRID_SIZE':None})
+    
+    ply_units <- here("data/ships_whales.gpkg")  |> 
+      read_sf("ships_whales")  |> 
+      st_intersection(ply_study) |> 
+      select(
+        hexid = HEXID,
+        grdid = grid_id) |> 
+      st_make_valid() |> 
+      mutate(
+        area_m2 = st_area(geom))
+    write_sf(ply_units, units_geo)
+    file_delete(dir_ls(here("data"), glob = "*.gpkg"))
+    
+    ply_ships <- ply_units |> 
+      group_by(grdid) |> 
+      summarize() 
+    write_sf(ply_ships, ships_geo)
+    
+    ply_whales <- ply_units |> 
+      group_by(hexid) |> 
+      summarize() 
+    write_sf(ply_whales, whales_geo)
+  }
+  ply_units <- read_sf(units_geo)
+  
+  # tables (*.csv): ships, whales limited to study ----
+  if (!file.exists(ships_csv)){
+    tbl_ships <- read_excel(ships_xls) |> # 313,200
+      rename(grdid = grid_id) |> 
+      filter(
+        grdid %in% unique(ply_units$grdid))
+    write_csv(tbl_ships, ships_csv)
+    
+    tbl_ships_avg <- tbl_ships |> 
+      group_by(grdid) |> 
+      summarize_all(sum) |> 
+      select(-yr, -mo)
+    write_csv(tbl_ships_avg, ships_avg_csv)
+  }
+
+  if (!file.exists(whales_csv)){
+    tbl_whales <- hex_whales |> 
+      st_drop_geometry() |> 
+      clean_names() |> 
+      filter(
+        hexid %in% unique(ply_units$hexid)) |> 
+      mutate(across(where(is.numeric), ~na_if(., -9999))) |> 
+      filter(if_any(!hexid, ~ !is.na(.))) |> 
+      rowwise() |> 
+      mutate(
+        avg_n = mean(c_across(ends_with("_n")), na.rm = T))
+    write_csv(tbl_whales, whales_csv)
+  }
+}
+ply_study     <- read_sf(study_geo)
+ply_units     <- read_sf(units_geo)
+ply_ships     <- read_sf(ships_geo)
+ply_whales    <- read_sf(whales_geo)
+tbl_ships     <- read_csv(ships_csv)
+tbl_ships_avg <- read_csv(ships_avg_csv)
+tbl_whales    <- read_csv(whales_csv)
+```
+
+## Whale Density, average
+
+```{r}
+#| label: map_whale_avg
+
+ply <- ply_whales |> 
+  inner_join(
+    tbl_whales |> 
+      select(
+        hexid, 
+        val = avg_n), 
+    by = "hexid")
+  
+map_ply_val(ply, "whales: n")
+```
+
+## Ship Traffic, all > 10 knots, average
+
+```{r}
+#| label: map_ships_avg
+
+ply <- ply_ships |> 
+  inner_join(
+    tbl_ships_avg |> 
+      select(
+        grdid, 
+        val = all_ihs_dist_km_sog_gt10), 
+    by = "grdid")
+  
+map_ply_val(ply, "ships: all > 10 knots")
+```
+
+
+## Ship Risk to Whales, average
+
+```{r}
+#| label: map_risk
+#| 
+ply <- ply_units |> 
+  left_join(
+    tbl_whales |> 
+      select(
+        hexid, 
+        whales_n = avg_n), 
+    by = "hexid") |> 
+  left_join(
+    tbl_ships_avg |> 
+      select(
+        grdid, 
+        ships_all_gt10 = all_ihs_dist_km_sog_gt10), 
+    by = "grdid") |> 
+  mutate(
+    val = whales_n * ships_all_gt10)
+map_ply_val(
+  ply, 
+  "risk: whales (n) * ships (all > 10 knots)")
+```
+
