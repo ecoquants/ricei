@@ -211,7 +211,7 @@ tbl_whales    <- read_csv(whales_csv)
 
 ```{r}
 #| label: map_whale_avg
-#| column: screen-inset-shaded
+#| column: page
 
 ply <- ply_whales |> 
   inner_join(
@@ -231,7 +231,7 @@ map_ply_val(
 
 ```{r}
 #| label: map_ships_avg
-#| column: screen-inset-shaded
+#| column: page
 
 ply <- ply_ships |> 
   inner_join(
@@ -252,7 +252,7 @@ map_ply_val(
 
 ```{r}
 #| label: map_risk
-#| column: screen-inset-shaded
+#| column: page
 
 ply <- ply_units |> 
   left_join(
@@ -269,6 +269,7 @@ ply <- ply_units |>
     by = "grdid") |> 
   mutate(
     val = whales_n * ships_all_gt10)
+
 map_ply_val(
   ply,
   "risk",
