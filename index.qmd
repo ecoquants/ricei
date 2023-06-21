@@ -59,7 +59,7 @@ map_ply_val <- function(
       weight       = 0,
       fillOpacity  = 0.7,
       smoothFactor = 0,
-      label        = ~glue("{label}: {val}")) |> 
+      label        = ~glue("{label}: {signif(val, 4)}")) |> 
     addLegend(
       pal      = pal, 
       values   = ~val, 
