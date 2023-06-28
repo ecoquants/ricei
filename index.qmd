@@ -23,9 +23,16 @@ editor_options:
   chunk_output_type: console
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = T,
+  warning = F,
+  message = F)
+```
+
+
 ```{r}
-#| label: setup
-#| warning: false
+#| label: libraries
 
 # packages ----
 librarian::shelf(
@@ -185,7 +192,7 @@ if (!all(file.exists(c(
   #   layer_name geometry_type features fields             crs_name
   # 1   Option_M       Polygon        1      6 NAD83 / Conus Albers
   # 2   Option_I       Polygon        1      6 NAD83 / Conus Albers
-  ply_wea <- map(st_layers(wea_gdb)$name, \(lyr) st_read(wea_gdb, lyr)) |> 
+  ply_wea <- map(st_layers(wea_gdb)$name, \(lyr) read_sf(wea_gdb, lyr)) |> 
     bind_rows() |> 
     st_transform(4326)
   # mapview(ply_wea)
@@ -198,7 +205,7 @@ if (!all(file.exists(c(
   # 
   # ply_wea$geom[1]
   
-  # st_read(wea_gdb, "Option_M")
+  # read_sf(wea_gdb, "Option_M")
   # read_sf(wind_gdb, "Wind_Planning_Area_Outlines_04_2023") |> 
   #   st_drop_geometry() |> View()
   #   mapview()
@@ -428,7 +435,7 @@ tbl_units <- ply_units |>
   st_drop_geometry()
 ```
 
-## Whale Density, average
+## Whale Density
 
 Per [Areas Under Restriction | Bureau of Ocean Energy Management](https://www.boem.gov/oil-gas-energy/leasing/areas-under-restriction), for the [Gulf of Mexico Presidential Withdrawals](https://www.boem.gov/oil-gas-energy/gom-planning-withdraw-areas):
 
@@ -493,7 +500,7 @@ mapView(ply_ppa)
 withdraw_gdb <- glue("{dir_raw}/boem/Withdraw2021.gdb")
 st_layers(withdraw_gdb)
 
-ply_withdraw <- st_read(withdraw_gdb, "BOEM_OCS_Areas_Withdrawn_from_Leasing") |> 
+ply_withdraw <- read_sf(withdraw_gdb, "BOEM_OCS_Areas_Withdrawn_from_Leasing") |> 
   st_make_valid() |> 
   st_transform(4326)
 
@@ -509,6 +516,59 @@ onmsR::sanctuaries
 
 - p. 292 Bryde’s whale area
 > This opinion defines the Bryde’s whale area to include the area from 100- to 400- meter isobaths from 87.5° W to 27.5° N as described in the status review (Rosel 2016) plus an additional 10 km around that area. The area designated in the status review was intended to “provide some buffer around the deeper water sightings and to include all sighting locations in the northeastern GOMx, respectively,” and was believed to be an area that the whales inhabit year round. The Bryde’s whale area for this opinion includes an outward expansion of 10 km around the area identified in the status review, for added protection of this extremely small population and accounting for ecological considerations.
+
+## Whale Area
+
+Bryde’s whale area (BioOp p. 292):
+
+> This opinion defines the Bryde’s whale area to include the area from 100- to 400- meter isobaths from 87.5° W to 27.5° N as described in the status review (Rosel 2016) plus an additional 10 km around that area. The area designated in the status review was intended to “provide some buffer around the deeper water sightings and to include all sighting locations in the northeastern GOMx, respectively,” and was believed to be an area that the whales inhabit year round. The Bryde’s whale area for this opinion includes an outward expansion of 10 km around the area identified in the status review, for added protection of this extremely small population and accounting for ecological considerations.
+
+```{r}
+gebco_tif <- glue("{dir_raw}/depth/gebco_2023_n31.0_s23.0_w-98.0_e-81.0.tif")
+
+r_gebco <- rast(gebco_tif) * -1
+r_lon <- init(r_gebco, "x")
+r_lat <- init(r_gebco, "y")
+r_rng <- r_gebco >= 100 &
+  r_gebco <= 400 & 
+  r_lon > -87.5 &
+  r_lat > 27.5
+ply_rng <- as.polygons(r_rng) |> 
+  st_as_sf() |> 
+  rename(value = 1) |> 
+  filter(value == 1) |> 
+  st_cast("POLYGON") |> 
+  mutate(
+    area_km2 = st_area(geometry) |> set_units("km^2")) |> 
+  arrange(desc(area_km2)) |> 
+  head(1) |> 
+  st_buffer(10000)
+
+r_gebco_study <- r_gebco |> 
+  mask(ply_study)
+
+ply_bia <- read_sf(bia_shp, quiet = T) |> 
+  filter(cmn_name == "Bryde's whale")
+
+# st_bbox(ply_bia)
+#      xmin      ymin      xmax      ymax 
+# -87.33637  26.60257 -84.05503  30.06229
+names(r_gebco_study) <- "depth_m"
+plet(
+  r_gebco_study, col="YlGnBu",
+  tiles=providers$Stamen.TonerLite) |> 
+  addPolygons(
+    data = ply_bia, color="pink", 
+    group = "ply_bia") |> 
+  addPolygons(
+    data = ply_rng, color="purple",
+    group = "ply_rng") |> 
+  addLegend(
+    colors = c("pink", "purple"),
+    labels = c("BIA (LeBrecque, 2016)", "Whale Area (BioOp)"),
+    group  = c("ply_bia", "ply_rng"))
+```
+
 
 ## Ship Traffic
 
