@@ -25,20 +25,23 @@ editor_options:
 
 ```{r}
 #| label: setup
+#| warning: false
 
 # packages ----
 librarian::shelf(
-  dplyr, fs, geojsonsf, ggplot2, ggspatial, glue, here, janitor, leaflet, leaflet.extras, mapview, mregions, readr, readxl, sf,
+  dplyr, fs, geojsonsf, ggplot2, ggspatial, glue, here, janitor, leafem, leaflet, leaflet.extras, lwgeom, mapview, mregions, noaa-onms/onmsR, purrr, readr, readxl, sf, stringr, terra, tidyr, units,
   quiet = T)
+# select = dplyr::select
 options(readr.show_col_types = F)
 
-# functions ---
+# functions ----
 map_ply_val <- function(
     ply, 
     label, legend,
     zoomControl        = knitr::is_html_output(),
     attributionControl = knitr::is_html_output(),
-    fullScreenControl  = knitr::is_html_output()){
+    fullScreenControl  = knitr::is_html_output(),
+    fillOpacity        = 1){
   pal <- colorNumeric("Spectral", domain = ply$val, reverse = T)
   
   m <- leaflet(
@@ -57,7 +60,7 @@ map_ply_val <- function(
     addPolygons(
       fillColor    = ~pal(val),
       weight       = 0,
-      fillOpacity  = 0.7,
+      fillOpacity  = fillOpacity,
       smoothFactor = 0,
       label        = ~glue("{label}: {signif(val, 4)}")) |> 
     addLegend(
@@ -72,6 +75,51 @@ map_ply_val <- function(
       leaflet.extras::addFullscreenControl()
   m
 }
+
+map_rast <- function(
+    r, 
+    legend,
+    colors             = "Spectral",
+    zoomControl        = knitr::is_html_output(),
+    attributionControl = knitr::is_html_output(),
+    fullScreenControl  = knitr::is_html_output(),
+    fillOpacity        = 1){
+  
+  pal <- colorNumeric(colors, domain = values(r), reverse = T, na.color = "transparent")
+  
+  n_arrow_img <- "https://cdn.pixabay.com/photo/2013/07/12/17/54/arrow-152596_960_720.png"
+  
+  m <- leaflet(
+    options = leafletOptions(
+      zoomControl        = zoomControl,
+      attributionControl = attributionControl)) |>
+    addProviderTiles(
+      "Esri.OceanBasemap",
+      options = providerTileOptions(
+        variant = "Ocean/World_Ocean_Base")) |>
+    addProviderTiles(
+      "Esri.OceanBasemap",
+      options = providerTileOptions(
+        variant = "Ocean/World_Ocean_Reference")) |> 
+    addRasterImage(
+      r, project = F,
+      colors = pal) |> 
+    addScaleBar(
+      position = c("bottomleft")) |> 
+    leafem::addLogo(n_arrow_img) |> 
+    addLegend(
+      pal      = pal, 
+      values   = values(r), 
+      opacity  = 0.7, 
+      title    = legend,
+      position = "topright")
+  
+  if (fullScreenControl)
+    m <- m |>
+      leaflet.extras::addFullscreenControl()
+  m
+}
+
 ```
 
 
@@ -86,33 +134,74 @@ map_ply_val <- function(
 
 # local paths ----
 
-# inputs
-ships_shp <- here("data/raw/ships/boem_gom_grid_pl_albers/boem_gom_grid_pl_albers.shp")
-ships_xls <- here("data/raw/ships/BOEM GoMex 2020 BiOp AIS Data for Rices Whale Risk Analysis.xlsx")
-whales_shp <- here("data/raw/whales/Rices_Whale_Monthly_Density.shp")
+# inputs: raw data 
+dir_raw    <- "/Users/bbest/My Drive/projects/ricei/data/raw" # Google Drive
+ships_shp  <- glue("{dir_raw}/ships/boem_gom_grid_pl_albers/boem_gom_grid_pl_albers.shp")
+ships_xls  <- glue("{dir_raw}/ships/BOEM GoMex 2020 BiOp AIS Data for Rices Whale Risk Analysis.xlsx")
+whales_shp <- glue("{dir_raw}/whales/Rices_Whale_Monthly_Density.shp")
+bia_shp    <- glue("{dir_raw}/whales/CetMap_BIA_WGS84/CetMap_BIA_WGS84.shp")
 
 # outputs
-study_geo      <- here("data/study.geojson")
-units_geo      <- here("data/units.geojson")
-ships_geo      <- here("data/ships.geojson")
-whales_geo     <- here("data/whales.geojson")
-ships_csv      <- here("data/ships.csv")
-ships_avg_csv  <- here("data/ships_avg.csv")
-whales_csv     <- here("data/whales.csv")
+whales_geo  <- here("data/whales.geojson") # hex_id:  whale densities by hexagon
+ships_geo   <- here("data/ships.geojson")  # grid_id: ship traffic by grid
+cells_geo   <- here("data/cells.geojson")  # cell_id: cells for output rasters
+cells_tif   <- here("data/cells.tif")      # cell_id: cells for output rasters
+units_gpkg  <- here("data/units.gpkg")     # unit_id: unit intersections for analysis
+study_geo   <- here("data/study.geojson")
+ships_csv   <- here("data/ships.csv")
+whales_csv  <- here("data/whales.csv")
+rast_tif    <- here("data/rasters.tif")
+
+# wind_gdb     <- here("data/raw/boem/BOEMWindLayers_4Download.gdb")
+wea_gdb    <- glue("{dir_raw}/boem/WEA_option_I_M_shapes_w_metadata")
+# * [Gulf of Mexico Draft WEAs | Bureau of Ocean Energy Management](https://www.boem.gov/renewable-energy/state-activities/gulf-mexico-draft-weas)
 
 # read data ----
 # transform all to geographic projection (4326)
 
 if (!all(file.exists(c(
-  study_geo, units_geo, ships_csv, whales_csv)))){
+  study_geo, units_gpkg, ships_csv, whales_csv)))){
   
   # ships
-  grd_ships <- read_sf(ships_shp) |> 
+  grid_ships <- read_sf(ships_shp) |> 
+    select(grid_id) |> 
     st_transform(4326)
   
   # whales
   hex_whales <- read_sf(whales_shp) |> 
+    rename(hex_id = HEXID) |> 
+    clean_names() |> 
     st_transform(4326)
+  
+  # wind: BOEM wind energy planning areas
+  # st_layers(wind_gdb)
+  #                            layer_name geometry_type features fields crs_name
+  # 1      BOEM_MHKLeasesandPlanningAreas Multi Polygon       17     21   WGS 84
+  # 2         Wind_Lease_Outlines_02_2023 Multi Polygon       34     16   WGS 84
+  # 3            BOEM_Wind_Leases_02_2023 Multi Polygon     3858     18   WGS 84
+  # 4 Wind_Planning_Area_Outlines_04_2023 Multi Polygon       37      8   WGS 84
+  # 5    BOEM_Wind_Planning_Areas_04_2023 Multi Polygon    13057     11   WGS 84
+  # st_layers(wea_gdb)
+  #   layer_name geometry_type features fields             crs_name
+  # 1   Option_M       Polygon        1      6 NAD83 / Conus Albers
+  # 2   Option_I       Polygon        1      6 NAD83 / Conus Albers
+  ply_wea <- map(st_layers(wea_gdb)$name, \(lyr) st_read(wea_gdb, lyr)) |> 
+    bind_rows() |> 
+    st_transform(4326)
+  # mapview(ply_wea)
+  
+  #  <- tibble(
+  #   layer = ) |> 
+  #   mutate(
+  #     geom = ) |> 
+  #   st_as_sf()
+  # 
+  # ply_wea$geom[1]
+  
+  # st_read(wea_gdb, "Option_M")
+  # read_sf(wind_gdb, "Wind_Planning_Area_Outlines_04_2023") |> 
+  #   st_drop_geometry() |> View()
+  #   mapview()
   
   # study area ----
   # as intersection of all dissolved (st_union) inputs: whales, ships, eez
@@ -125,7 +214,7 @@ if (!all(file.exists(c(
       st_transform(4326) # mapview(us_eez)
     
     # intersect all
-    ply_study <- st_union(grd_ships) |> 
+    ply_study <- st_union(grid_ships) |> 
       st_intersection(
         st_union(hex_whales)) |> 
       st_intersection(
@@ -136,144 +225,503 @@ if (!all(file.exists(c(
   }
   ply_study <- read_sf(study_geo)
   
-  # units: intersection of ships, whales, eez ----
-  if (!file.exists(units_geo)){
-    grd_ships |> write_sf(here("data/ships.gpkg"))
-    hex_whales |> write_sf(here("data/whales.gpkg"))
-    
-    # ran intersection in QGIS
-    stop("run intersection in QGIS manually")
-    # processing.run("native:intersection", {'INPUT':QgsProcessingFeatureSourceDefinition('/Users/bbest/Github/ecoquants/ricei/data/whales.gpkg|layername=whales', selectedFeaturesOnly=False, featureLimit=-1, flags=QgsProcessingFeatureSourceDefinition.FlagOverrideDefaultGeometryCheck, geometryCheck=QgsFeatureRequest.GeometryNoCheck),'OVERLAY':QgsProcessingFeatureSourceDefinition('/Users/bbest/Github/ecoquants/ricei/data/ships.gpkg|layername=ships', selectedFeaturesOnly=False, featureLimit=-1, flags=QgsProcessingFeatureSourceDefinition.FlagOverrideDefaultGeometryCheck, geometryCheck=QgsFeatureRequest.GeometryNoCheck),'INPUT_FIELDS':[],'OVERLAY_FIELDS':[],'OVERLAY_FIELDS_PREFIX':'','OUTPUT':'ogr:dbname=\'/Users/bbest/Github/ecoquants/ricei/data/ships_whales.gpkg\' table="ships_whales" (geom)','GRID_SIZE':None})
-    
-    ply_units <- here("data/ships_whales.gpkg")  |> 
-      read_sf("ships_whales")  |> 
-      st_intersection(ply_study) |> 
-      select(
-        hexid = HEXID,
-        grdid = grid_id) |> 
-      st_make_valid() |> 
-      mutate(
-        area_m2 = st_area(geom))
-    write_sf(ply_units, units_geo)
-    file_delete(dir_ls(here("data"), glob = "*.gpkg"))
-    
-    ply_ships <- ply_units |> 
-      group_by(grdid) |> 
-      summarize() 
-    write_sf(ply_ships, ships_geo)
-    
-    ply_whales <- ply_units |> 
-      group_by(hexid) |> 
-      summarize() 
-    write_sf(ply_whales, whales_geo)
-  }
-  ply_units <- read_sf(units_geo)
+  # break up study area into smaller polygons for faster intersecting
+  sf_use_s2(F)
+  plys_study <- st_subdivide(ply_study, 1000) |> 
+    st_cast() |> 
+    st_make_valid()
+  sf_use_s2(T)
+  stopifnot( sum(!st_is_valid(plys_study)) == 0)
   
-  # tables (*.csv): ships, whales limited to study ----
-  if (!file.exists(ships_csv)){
-    tbl_ships <- read_excel(ships_xls) |> # 313,200
-      rename(grdid = grid_id) |> 
-      filter(
-        grdid %in% unique(ply_units$grdid))
-    write_csv(tbl_ships, ships_csv)
+  # cells: common raster output ----
+  if (!all(file.exists(c(cells_geo, cells_tif)))){
     
-    tbl_ships_avg <- tbl_ships |> 
-      group_by(grdid) |> 
-      summarize_all(sum) |> 
-      select(-yr, -mo)
-    write_csv(tbl_ships_avg, ships_avg_csv)
-  }
+    bb <- ply_study |> 
+      st_transform(3857) |> 
+      ext()
+    # Roberts et al (2016b): # animals / 100 km^2
+    # librarian::shelf(raster)
+    # r <- raster(here("data/raw/whales/Duke_GOM_Brydes_whale/GOM_Brydes_whale_abundance.img"))
+    # cellStats(r, "sum")
+    # 44.16129 # confirmed Abundance = 44
+    # raster::res(r) # 10000 10000
+  
+    r_cells <- rast(
+      xmin   = bb$xmin, xmax = bb$xmax,
+      ymin   = bb$ymin, ymax = bb$ymax,
+      res    = 10 * 1000, # 10 km
+      crs    = "epsg:3857", 
+      extent = bb)
+    names(r_cells) <- "cell_id"
+    values(r_cells) <- cells(r_cells)
+    # plet(r_cells, tiles = providers$Esri.OceanBasemap)
+    writeRaster(r_cells, cells_tif, overwrite=T)
+    writeRaster(r_cells, rast_tif, overwrite=T)
+    
+    sf_use_s2(F)
+    ply_cells <- as.polygons(r_cells) |> 
+      st_as_sf() |> 
+      st_transform(4326) |> 
+      st_filter(plys_study)
+      
+    ply_cells <- ply_cells |> 
+      st_intersection( 
+        plys_study) |> 
+      group_by(
+        cell_id) |> 
+      summarize() |> 
+      mutate( 
+        area_km2 = st_area(geometry) |> set_units("km^2"))
 
-  if (!file.exists(whales_csv)){
-    tbl_whales <- hex_whales |> 
-      st_drop_geometry() |> 
-      clean_names() |> 
-      filter(
-        hexid %in% unique(ply_units$hexid)) |> 
-      mutate(across(where(is.numeric), ~na_if(., -9999))) |> 
-      filter(if_any(!hexid, ~ !is.na(.))) |> 
-      rowwise() |> 
-      mutate(
-        avg_n = mean(c_across(ends_with("_n")), na.rm = T))
-    write_csv(tbl_whales, whales_csv)
+    sf_use_s2(T)
+    
+    write_sf(ply_cells, cells_geo, delete_dsn = T)
   }
+  r_cells   <- rast(cells_tif)
+  ply_cells <- read_sf(cells_geo)
+
+  # whales: hex_id with non-NA value overlapping with study area (EEZ) ----
+  if (!all(file.exists(c(whales_geo, whales_csv)))){
+    
+    tbl_whales_mo <- hex_whales |>  # 42,908 × 38
+      st_filter(plys_study) |> 
+      st_drop_geometry() |> 
+      pivot_longer(
+        !hex_id, 
+        names_to  = "metric",
+        values_to = "value") |> 
+      filter(value != -9999) |> 
+      separate_wider_delim(
+        metric, "_", 
+        names = c("month", "metric"))
+    
+    tbl_whales_avg <- tbl_whales_mo |> 
+      group_by(
+        hex_id, metric) |> 
+      summarize(
+        value = mean(value),
+        .groups = "drop")
+    
+    tbl_whales <- bind_rows(
+      tbl_whales_avg |> 
+        mutate(
+          timespan = "avg"),
+      tbl_whales_mo |> 
+        mutate(
+          timespan = "month")) |> 
+      select(hex_id, timespan, month, metric, value)
+    write_csv(tbl_whales, whales_csv)
+    
+    ply_whales <- hex_whales |> 
+      select(hex_id) |> 
+      filter(hex_id %in% unique(tbl_whales_avg$hex_id)) |> 
+      st_intersection(
+        plys_study) |> 
+      group_by(
+        hex_id) |> 
+      summarize() |> 
+      mutate(
+        area_km2 = st_area(geometry) |> set_units("km^2"))
+    
+    write_sf(ply_whales, whales_geo, delete_dsn = T)
+  }
+  ply_whales <- read_sf(whales_geo)
+  tbl_whales <- read_csv(whales_csv)
+  
+  # ships: grid_id of ships intersecting with whales, cells, eez ----
+  if (!all(file.exists(c(ships_geo, ships_csv)))){
+  
+    sf_use_s2(F)
+    ply_ships <- grid_ships |> 
+      st_filter(plys_study) |>
+      st_intersection(
+        plys_study) |> 
+      group_by(
+        grid_id) |> 
+      summarize() |> 
+      mutate( 
+        area_km2 = st_area(geometry) |> set_units("km^2"))
+    sf_use_s2(T)
+    write_sf(ply_ships, ships_geo, delete_dsn = T)
+    
+    tbl_ships_yr_mo <- read_excel(ships_xls) |> 
+      filter(
+        grid_id %in% unique(ply_ships$grid_id)) |> 
+      pivot_longer(
+        !c(yr, mo, grid_id),
+        names_to = "metric",
+        values_to = "value") |>
+      filter(value > 0) |> 
+      mutate(
+        metric = str_replace(metric, "ihs_dist_km_sog_", ""))
+    # table(tbl_ships_yr_mo$metric)
+    #   all_gt01  all_gt10 boem_gt01 boem_gt10 
+    #     236402    220567    191231    162695
+
+    tbl_ships_avg <- tbl_ships_yr_mo |> 
+      group_by(
+        grid_id, metric) |> 
+      summarize(
+        value = mean(value),
+        .groups = "drop")
+    
+    tbl_ships <- bind_rows(
+      tbl_ships_avg |> 
+        mutate(
+          timespan = "avg"),
+      tbl_ships_yr_mo |> 
+        mutate(
+          timespan = "year-month")) |> 
+      select(grid_id, timespan, year = yr, month = mo, metric, value)
+    write_csv(tbl_ships, ships_csv)
+  }
+  ply_ships <- read_sf(ships_geo)
+  tbl_ships <- read_csv(ships_csv)
+
+  # units: intersection of ships, whales, cells ----
+  if (!file.exists(units_gpkg)){
+    
+    # ply_units: [(ships * whales) + (ships - whales)] * cells
+    
+    # turn off spherical geometry for faster intersections
+    sf_use_s2(F) 
+    
+    ply_whales_ships <- ply_whales |> 
+      select(hex_id) |> 
+      st_intersection(
+        ply_ships |> 
+          select(grid_id))
+      
+    ply_ships_notwhales <- ply_ships |> 
+      select(grid_id) |> 
+      st_difference(
+        st_union(ply_whales))
+    
+    ply_units <- bind_rows(
+      ply_whales_ships,
+      ply_ships_notwhales)
+    
+    ply_units <- ply_units |> 
+      st_intersection(
+        ply_cells |> 
+          select(cell_id)) |>
+      mutate(
+        area_km2 = st_area(geometry) |> set_units("km^2"))
+    
+    sf_use_s2(T)
+    
+    write_sf(ply_units, units_gpkg, delete_dsn=T)
+  }
+  ply_units <- read_sf(units_gpkg)
 }
-ply_study     <- read_sf(study_geo)
-ply_units     <- read_sf(units_geo)
-ply_ships     <- read_sf(ships_geo)
-ply_whales    <- read_sf(whales_geo)
-tbl_ships     <- read_csv(ships_csv)
-tbl_ships_avg <- read_csv(ships_avg_csv)
-tbl_whales    <- read_csv(whales_csv)
+ply_study  <- read_sf(study_geo)
+ply_cells  <- read_sf(cells_geo)
+ply_units  <- read_sf(units_gpkg)
+ply_ships  <- read_sf(ships_geo)
+ply_whales <- read_sf(whales_geo)
+tbl_ships  <- read_csv(ships_csv)
+tbl_whales <- read_csv(whales_csv)
+r_cells    <- rast(cells_tif)
+stk_rast   <- rast(rast_tif)
+
+tbl_units <- ply_units |> 
+  st_drop_geometry()
 ```
 
 ## Whale Density, average
+
+Per [Areas Under Restriction | Bureau of Ocean Energy Management](https://www.boem.gov/oil-gas-energy/leasing/areas-under-restriction), for the [Gulf of Mexico Presidential Withdrawals](https://www.boem.gov/oil-gas-energy/gom-planning-withdraw-areas):
+
+> The portions of the Central Planning Area and Eastern Planning Area that are subject to the restrictions under GOMESA were further withdrawn until June 30, 2032, by Presidential Memorandum, dated September 8, 2020.
+
 
 ```{r}
 #| label: map_whale_avg
 #| column: page
 
-ply <- ply_whales |> 
-  inner_join(
-    tbl_whales |> 
-      select(
-        hexid, 
-        val = avg_n), 
-    by = "hexid")
-  
-map_ply_val(
-  ply, 
-  "whales",
-  "whales: n")
+lyr <- "whales_avg_n_per_100km2"
+if (!lyr %in% names(stk_rast)){
+  r <- ply_cells |> 
+    inner_join(
+      tbl_units |> 
+        left_join(
+          tbl_whales |> 
+            filter(
+              timespan == "avg",
+              metric   == "n") |> 
+            select(hex_id, value),
+          by = "hex_id") |> 
+        group_by(cell_id) |> 
+        summarize(
+          value = weighted.mean(value, area_km2),
+          .groups = "drop"),
+      by = "cell_id") |> 
+    st_transform(3857) |> 
+    rasterize(
+      r_cells, 
+      field = "value")
+
+  names(r) <- lyr
+  writeRaster(r, rast_tif, gdal="APPEND_SUBDATASET=YES")
+  stk_rast   <- rast(rast_tif)
+}
+
+map_rast(stk_rast[lyr], "whales<br><small>(#/km<sup>2</sup>)</small>")
 ```
 
-## Ship Traffic, all > 10 knots, average
+Total individuals (sum): `r global(stk_rast[lyr], "sum", na.rm = T)[1, "sum"]`
+
+vs most recent literature from 2017-18 surveys:
+- Garrison et al. (2020): 51.3 (CV = 0.503) []
+  - without p0 correction, so expect a higher number
+  - [Table 7]
+- looks reasonable
 
 ```{r}
-#| label: map_ships_avg
-#| column: page
+#| label: boem_other
+#| eval: false
 
-ply <- ply_ships |> 
-  inner_join(
-    tbl_ships_avg |> 
-      select(
-        grdid, 
-        val = all_ihs_dist_km_sog_gt10), 
-    by = "grdid")
-  
-map_ply_val(
-  ply, 
-  "ships",
-  "ships: all > 10 knots")
+# * [Geographic Mapping Data in Digital Format](https://www.data.boem.gov/Main/Mapping.aspx)
+# /Users/bbest/Github/ecoquants/ricei/data/raw/boem/FedStateBoundary.gdb
+
+# [Geographic Mapping Data in Digital Format](https://www.data.boem.gov/Main/Mapping.aspx)
+ppa_shp <- glue("{dir_raw}/boem/Gom_5yr_2019_2024/2019-2024DPPAreas_GOM.shp")
+ply_ppa <- read_sf(ppa_shp)
+ply_ppa
+mapView(ply_ppa)
+
+withdraw_gdb <- glue("{dir_raw}/boem/Withdraw2021.gdb")
+st_layers(withdraw_gdb)
+
+ply_withdraw <- st_read(withdraw_gdb, "BOEM_OCS_Areas_Withdrawn_from_Leasing") |> 
+  st_make_valid() |> 
+  st_transform(4326)
+
+mapview(ply_withdraw)
+
+onmsR::sanctuaries
 ```
 
+- Figures: 63 & 64, 74
+  * 
+- Tables: 49, 50, 51
 
-## Ship Risk to Whales, average
+
+- p. 292 Bryde’s whale area
+> This opinion defines the Bryde’s whale area to include the area from 100- to 400- meter isobaths from 87.5° W to 27.5° N as described in the status review (Rosel 2016) plus an additional 10 km around that area. The area designated in the status review was intended to “provide some buffer around the deeper water sightings and to include all sighting locations in the northeastern GOMx, respectively,” and was believed to be an area that the whales inhabit year round. The Bryde’s whale area for this opinion includes an outward expansion of 10 km around the area identified in the status review, for added protection of this extremely small population and accounting for ecological considerations.
+
+## Ship Traffic
+
+### OLD
+
+::: {.panel-tabset}
+
+#### Figure 56 (ships-all)
+
+![Figure 56. Vessel Traffic in the Gulf of Mexico. Data represent annual average kilometers (km) of vessel traffic from all vessels based on AIS data from 2014-2018](BioOp/Figures/Figure56_ships-all-gt01.jpg)
+
+#### Figure 57 (ships-boem)
+
+![Figure 57. Oil and Gas Vessel Traffic in the Gulf of Mexico. Data represent annual average kilometers (km) of vessel traffic from oil and gas related vessels based on AIS data from 2014-2018.](BioOp/Figures/Figure57_ships-boem-gt01.jpg)
+:::
+
+### NEW
+
+::: {.panel-tabset}
+
+#### ships-all
 
 ```{r}
-#| label: map_risk
+#| label: map_ships_all
 #| column: page
 
-ply <- ply_units |> 
-  left_join(
-    tbl_whales |> 
-      select(
-        hexid, 
-        whales_n = avg_n), 
-    by = "hexid") |> 
-  left_join(
-    tbl_ships_avg |> 
-      select(
-        grdid, 
-        ships_all_gt10 = all_ihs_dist_km_sog_gt10), 
-    by = "grdid") |> 
-  mutate(
-    val = whales_n * ships_all_gt10)
+lyr <- "ships_all_gt01"
+if (!lyr %in% names(stk_rast)){
+  r <- ply_cells |> 
+    inner_join(
+      tbl_units |> 
+        left_join(
+          tbl_ships |> 
+            filter(
+              timespan == "avg",
+              metric   == "all_gt01") |> 
+            select(grid_id, value),
+          by = "grid_id") |> 
+        group_by(cell_id) |> 
+        summarize(
+          value = weighted.mean(value, area_km2),
+          .groups = "drop"),
+      by = "cell_id") |> 
+    st_transform(3857) |> 
+    rasterize(
+      r_cells, 
+      field = "value")
 
-map_ply_val(
-  ply,
-  "risk",
-  "risk: whales (n) * ships (all > 10 knots)")
+  names(r) <- lyr
+  writeRaster(r, rast_tif, gdal="APPEND_SUBDATASET=YES")
+  stk_rast   <- rast(rast_tif)
+}
+
+map_rast(stk_rast[lyr], "ships,<br>all <small>(km)</small>", "RdYlGn")
 ```
+
+#### ships-boem
+
+```{r}
+#| label: map_ships_boem_gt01
+#| column: page
+
+lyr <- "ships_boem_gt01"
+if (!lyr %in% names(stk_rast)){
+  r <- ply_cells |> 
+    inner_join(
+      tbl_units |> 
+        left_join(
+          tbl_ships |> 
+            filter(
+              timespan == "avg",
+              metric   == "boem_gt01") |> 
+            select(grid_id, value),
+          by = "grid_id") |> 
+        group_by(cell_id) |> 
+        summarize(
+          value = weighted.mean(value, area_km2),
+          .groups = "drop"),
+      by = "cell_id") |> 
+    st_transform(3857) |> 
+    rasterize(
+      r_cells, 
+      field = "value")
+
+  names(r) <- lyr
+  writeRaster(r, rast_tif, gdal="APPEND_SUBDATASET=YES")
+  stk_rast   <- rast(rast_tif)
+}
+
+map_rast(stk_rast[lyr], "ships,<br>oil & gas <small>(km)</small>", "RdYlGn")
+```
+
+:::
+
+## Ship Risk to Whales
+
+### OLD
+
+::: {.panel-tabset}
+
+#### Figure 63 (risk-boem-all)
+
+![Figure 63. Relative vessel strike risk to Bryde’s whales from oil and gas vessel traffic of all speeds.](BioOp/Figures/Figure63_risk-boem-gt01.jpg)
+
+#### Figure 64 (risk-boem-gt10)
+
+![Figure 64. Relative vessel strike risk to Bryde’s whales from oil and gas vessel traffic greater than 10 knots.](BioOp/Figures/Figure64_risk-boem-gt10.jpg)
+:::
+
+### NEW
+
+::: {.panel-tabset}
+
+#### risk-boem-all
+
+```{r}
+#| label: map_risk-boem-gt01
+#| column: page
+
+lyr <- "risk_boem_gt01"
+if (!lyr %in% names(stk_rast)){
+  r <- ply_cells |> 
+    inner_join(
+      tbl_units |> 
+        left_join(
+          tbl_whales |> 
+            filter(
+              timespan == "avg",
+              metric   == "n") |> 
+            select(
+              hex_id, 
+              whales_n = value),
+          by = "hex_id") |> 
+        left_join(
+          tbl_ships |> 
+            filter(
+              timespan == "avg",
+              metric   == "all_gt01") |> 
+            select(
+              grid_id, 
+              ships_km = value),
+          by = "grid_id") |> 
+        mutate(
+          value = whales_n * ships_km) |> 
+        group_by(cell_id) |> 
+        summarize(
+          value = weighted.mean(value, area_km2),
+          .groups = "drop"),
+      by = "cell_id") |> 
+    st_transform(3857) |> 
+    rasterize(
+      r_cells, 
+      field = "value")
+
+  names(r) <- lyr
+  writeRaster(r, rast_tif, gdal="APPEND_SUBDATASET=YES")
+  stk_rast   <- rast(rast_tif)
+}
+
+map_rast(stk_rast[lyr], "risk,<br>oil & gas,<br>all speeds <br><small>(# whales * km ships)</small>", "RdYlGn")
+```
+
+
+#### risk-boem-gt10
+
+```{r}
+#| label: map_risk-boem-gt10
+#| column: page
+
+lyr <- "risk_boem_gt10"
+if (!lyr %in% names(stk_rast)){
+  r <- ply_cells |> 
+    inner_join(
+      tbl_units |> 
+        left_join(
+          tbl_whales |> 
+            filter(
+              timespan == "avg",
+              metric   == "n") |> 
+            select(
+              hex_id, 
+              whales_n = value),
+          by = "hex_id") |> 
+        left_join(
+          tbl_ships |> 
+            filter(
+              timespan == "avg",
+              metric   == "all_gt10") |> 
+            select(
+              grid_id, 
+              ships_km = value),
+          by = "grid_id") |> 
+        mutate(
+          value = whales_n * ships_km) |> 
+        group_by(cell_id) |> 
+        summarize(
+          value = weighted.mean(value, area_km2),
+          .groups = "drop"),
+      by = "cell_id") |> 
+    st_transform(3857) |> 
+    rasterize(
+      r_cells, 
+      field = "value")
+
+  names(r) <- lyr
+  writeRaster(r, rast_tif, gdal="APPEND_SUBDATASET=YES")
+  stk_rast   <- rast(rast_tif)
+}
+
+map_rast(stk_rast[lyr], "risk,<br>oil & gas,<br>> 10 knots <br><small>(# whales * km ships)</small>", "RdYlGn")
+```
+
+:::
+
 
 
