@@ -4,3 +4,5 @@
 .Ruserdata
 .DS_Store
 rosm.cache
+_tmp_*
+~$*.docx
