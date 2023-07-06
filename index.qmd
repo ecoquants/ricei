@@ -205,11 +205,14 @@ d |>
 
 ```{r}
 #| label: tbl-risk-gt10-reduction-by-areas
-#| tbl-cap: "Reduction of vessel strike risk over 10 knots (# whales * km vessel traffic) to Rice's whales with enforcement of proposed mitigation areas for oil and gas vessels."
+#| tbl-cap: "Reduction of vessel strike risk from oil and gas vessel traffic over 10 knots (# whales * km vessel traffic) to Rice's whales with enforcement of proposed mitigation areas for oil and gas vessels."
 
-d <- read_csv(risk_gt10_reduction_by_areas_csv) |> 
+d <- read_csv(risk_reduction_by_areas_csv) |> 
   # names() |> paste(collapse=", ")
-  select(yr, risk_boem_gt10_wab, pct_risk_reduced_boem_gt10_wab, risk_boem_gt10_wan, pct_risk_reduced_boem_gt10_wan) |> 
+  select(
+    yr, 
+    risk_boem_gt10_wab, pct_risk_reduced_boem_gt10_wab, risk_boem_gt10_wan, pct_risk_reduced_boem_gt10_wan,
+    risk_all_gt10_wab, pct_risk_reduced_all_gt10_wab, risk_all_gt10_wan, pct_risk_reduced_all_gt10_wan) |> 
   mutate(
     # risk_all_gt10  = round(risk_all_gt10)  |> format(big.mark = ","),
     # risk_boem_gt10 = round(risk_boem_gt10) |> format(big.mark = ","),
@@ -217,7 +220,11 @@ d <- read_csv(risk_gt10_reduction_by_areas_csv) |>
     risk_boem_gt10_wab             = round(risk_boem_gt10_wab)  |> format(big.mark = ","),
     pct_risk_reduced_boem_gt10_wab = percent(pct_risk_reduced_boem_gt10_wab, accuracy=1),
     risk_boem_gt10_wan             = round(risk_boem_gt10_wan) |> format(big.mark = ","),
-    pct_risk_reduced_boem_gt10_wan = percent(pct_risk_reduced_boem_gt10_wan, accuracy=1))
+    pct_risk_reduced_boem_gt10_wan = percent(pct_risk_reduced_boem_gt10_wan, accuracy=1),
+    risk_all_gt10_wab              = round(risk_all_gt10_wab)  |> format(big.mark = ","),
+    pct_risk_reduced_all_gt10_wab  = percent(pct_risk_reduced_all_gt10_wab, accuracy=1),
+    risk_all_gt10_wan              = round(risk_all_gt10_wan) |> format(big.mark = ","),
+    pct_risk_reduced_all_gt10_wan  = percent(pct_risk_reduced_all_gt10_wan, accuracy=1))
 # names(d) |> paste(collapse= '",\n"" = "') |> cat()
 col_names <- c(
   "Year" = "yr",
@@ -226,8 +233,12 @@ col_names <- c(
   # "Proportion of Vessel Strike Risk due to Oil and Gas Vessel Traffic All Speeds" = "pct_boem_gt10",
   "Vessel Strike Risk for Oil and Gas Vessel Traffic > 10 knots within the Original Whale Area (NMFS, 2020; Figure 1)" = "risk_boem_gt10_wab",
   "Proportion of Risk Reduction to All Vessel Traffic through Enforcement on Oil & Gas Vessels of the Original Whale Area (NMFS, 2020; Figure 1)" = "pct_risk_reduced_boem_gt10_wab",
-  "Vessel Strike Risk for Oil and Gas Vessel Traffic > 10 knots within the New Whale Area (NMFS, 2020; Figure 2)" = "risk_boem_gt10_wan",
-  "Proportion of Risk Reduction to All Vessel Traffic through Enforcement on Oil & Gas Vessels of the New Whale Area (Figure 2)" = "pct_risk_reduced_boem_gt10_wan")
+  "Vessel Strike Risk for Oil and Gas Vessel Traffic > 10 knots within the New Whale Area (Figure 2)" = "risk_boem_gt10_wan",
+  "Proportion of Risk Reduction to All Vessel Traffic through Enforcement on Oil & Gas Vessels of the New Whale Area (Figure 2)" = "pct_risk_reduced_boem_gt10_wan",
+  "Vessel Strike Risk for All Vessel Traffic > 10 knots within the Original Whale Area (NMFS, 2020; Figure 1)" = "risk_all_gt10_wab",
+  "Proportion of Risk Reduction to All Vessel Traffic through Enforcement on All Vessels of the Original Whale Area (NMFS, 2020; Figure 1)" = "pct_risk_reduced_all_gt10_wab",
+  "Vessel Strike Risk for All Vessel Traffic > 10 knots within the New Whale Area (Figure 2)" = "risk_all_gt10_wan",
+  "Proportion of Risk Reduction to All Vessel Traffic through Enforcement on All Vessels of the New Whale Area (Figure 2)" = "pct_risk_reduced_all_gt10_wan")
 
 d |> 
   rename(all_of(col_names)) |> 
@@ -237,11 +248,14 @@ d |>
 
 ```{r}
 #| label: tbl-risk-gt01-reduction-by-areas
-#| tbl-cap: "Reduction of vessel strike risk at all speeds (# whales * km vessel traffic) to Rice's whales with enforcement of proposed mitigation areas for oil and gas vessels."
+#| tbl-cap: "Reduction of vessel strike risk from oil and gas vessel traffic at all speeds (# whales * km vessel traffic) to Rice's whales with enforcement of proposed mitigation areas for oil and gas vessels."
 
-d <- read_csv(risk_gt01_reduction_by_areas_csv) |> 
+d <- read_csv(risk_reduction_by_areas_csv) |> 
   # names() |> paste(collapse=", ")
-  select(yr, risk_boem_gt01_wab, pct_risk_reduced_boem_gt01_wab, risk_boem_gt01_wan, pct_risk_reduced_boem_gt01_wan) |> 
+  select(
+    yr, 
+    risk_boem_gt01_wab, pct_risk_reduced_boem_gt01_wab, risk_boem_gt01_wan, pct_risk_reduced_boem_gt01_wan,
+    risk_all_gt01_wab, pct_risk_reduced_all_gt01_wab, risk_all_gt01_wan, pct_risk_reduced_all_gt01_wan) |> 
   mutate(
     # risk_all_gt01  = round(risk_all_gt01)  |> format(big.mark = ","),
     # risk_boem_gt01 = round(risk_boem_gt01) |> format(big.mark = ","),
@@ -249,7 +263,11 @@ d <- read_csv(risk_gt01_reduction_by_areas_csv) |>
     risk_boem_gt01_wab             = round(risk_boem_gt01_wab)  |> format(big.mark = ","),
     pct_risk_reduced_boem_gt01_wab = percent(pct_risk_reduced_boem_gt01_wab, accuracy=1),
     risk_boem_gt01_wan             = round(risk_boem_gt01_wan) |> format(big.mark = ","),
-    pct_risk_reduced_boem_gt01_wan = percent(pct_risk_reduced_boem_gt01_wan, accuracy=1))
+    pct_risk_reduced_boem_gt01_wan = percent(pct_risk_reduced_boem_gt01_wan, accuracy=1),
+    risk_all_gt01_wab             = round(risk_all_gt01_wab)  |> format(big.mark = ","),
+    pct_risk_reduced_all_gt01_wab = percent(pct_risk_reduced_all_gt01_wab, accuracy=1),
+    risk_all_gt01_wan             = round(risk_all_gt01_wan) |> format(big.mark = ","),
+    pct_risk_reduced_all_gt01_wan = percent(pct_risk_reduced_all_gt01_wan, accuracy=1))
 # names(d) |> paste(collapse= '",\n"" = "') |> cat()
 col_names <- c(
   "Year" = "yr",
@@ -259,7 +277,11 @@ col_names <- c(
   "Vessel Strike Risk for Oil and Gas Vessel Traffic at all speeds within the Original Whale Area (NMFS, 2020; Figure 1)" = "risk_boem_gt01_wab",
   "Proportion of Risk Reduction to All Vessel Traffic through Enforcement on Oil & Gas Vessels of the Original Whale Area (NMFS, 2020; Figure 1)" = "pct_risk_reduced_boem_gt01_wab",
   "Vessel Strike Risk for Oil and Gas Vessel Traffic at all speeds within the New Whale Area (Figure 2)" = "risk_boem_gt01_wan",
-  "Proportion of Risk Reduction to All Vessel Traffic through Enforcement on Oil & Gas Vessels of the New Whale Area (NMFS, 2020; Figure 2)" = "pct_risk_reduced_boem_gt01_wan")
+  "Proportion of Risk Reduction to All Vessel Traffic through Enforcement on Oil & Gas Vessels of the New Whale Area (Figure 2)" = "pct_risk_reduced_boem_gt01_wan",
+  "Vessel Strike Risk for All Vessel Traffic at all speeds within the Original Whale Area (NMFS, 2020; Figure 1)" = "risk_all_gt01_wab",
+  "Proportion of Risk Reduction to All Vessel Traffic through Enforcement on All Vessels of the Original Whale Area (NMFS, 2020; Figure 1)" = "pct_risk_reduced_all_gt01_wab",
+  "Vessel Strike Risk for All Vessel Traffic at all speeds within the New Whale Area (Figure 2)" = "risk_all_gt01_wan",
+  "Proportion of Risk Reduction to All Vessel Traffic through Enforcement on All Vessels of the New Whale Area (Figure 2)" = "pct_risk_reduced_all_gt01_wan")
 
 d |> 
   rename(all_of(col_names)) |> 

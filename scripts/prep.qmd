@@ -1006,7 +1006,7 @@ write_csv(d, risk_overview_csv)
 ```
 
 ```{r}
-#| label: risk_gt10_reduction_by_areas_csv
+#| label: risk_reduction_by_areas_csv
 
 d <- tibble(
   yr                = yrs,
@@ -1019,32 +1019,6 @@ d <- tibble(
     global("sum", na.rm=T) |> 
     pull(sum),
   pct_boem_gt10     = risk_boem_gt10 / risk_all_gt10,
-  # Whale Area BioOp risk (reduced if enacted)
-  risk_boem_gt10_wab = stk_rast |> 
-    subset(glue("risk_{yrs}_boem_gt10")) |>
-    mask(stk_rast["whale_area_bioop"]) |> 
-    global("sum", na.rm=T) |> 
-    pull(sum),
-  pct_risk_reduced_boem_gt10_wab = risk_boem_gt10_wab / risk_all_gt10,
-  # Whale Area New risk (reduced if enacted)
-  risk_boem_gt10_wan = stk_rast |> 
-    subset(glue("risk_{yrs}_boem_gt10")) |>
-    mask(stk_rast["whale_area_new"]) |> 
-    global("sum", na.rm=T) |> 
-    pull(sum),
-  pct_risk_reduced_boem_gt10_wan = risk_boem_gt10_wan / risk_all_gt10)
-  
-write_csv(d, risk_gt10_reduction_by_areas_csv)
-```
-
-```{r}
-#| label: risk_gt01_reduction_by_areas_csv
-
-yrs <- 2015:2018
-stk_rast   <- rast(rast_tif)
-
-d <- tibble(
-  yr                = yrs,
   risk_all_gt01  = stk_rast |> 
     subset(glue("risk_{yrs}_all_gt01")) |> 
     global("sum", na.rm=T) |> 
@@ -1054,6 +1028,32 @@ d <- tibble(
     global("sum", na.rm=T) |> 
     pull(sum),
   pct_boem_gt01     = risk_boem_gt01 / risk_all_gt01,
+  risk_boem_gt10_wab = stk_rast |> 
+    subset(glue("risk_{yrs}_boem_gt10")) |>
+    mask(stk_rast["whale_area_bioop"]) |> 
+    global("sum", na.rm=T) |> 
+    pull(sum),
+  pct_risk_reduced_boem_gt10_wab = risk_boem_gt10_wab / risk_all_gt10,
+  risk_boem_gt10_wan = stk_rast |> 
+    subset(glue("risk_{yrs}_boem_gt10")) |>
+    mask(stk_rast["whale_area_new"]) |> 
+    global("sum", na.rm=T) |> 
+    pull(sum),
+  pct_risk_reduced_boem_gt10_wan = risk_boem_gt10_wan / risk_all_gt10,
+  # all Whale Area BioOp risk (reduced if enacted)
+  risk_all_gt10_wab = stk_rast |> 
+    subset(glue("risk_{yrs}_all_gt10")) |>
+    mask(stk_rast["whale_area_bioop"]) |> 
+    global("sum", na.rm=T) |> 
+    pull(sum),
+  pct_risk_reduced_all_gt10_wab = risk_all_gt10_wab / risk_all_gt10,
+  # all Whale Area New risk (reduced if enacted)
+  risk_all_gt10_wan = stk_rast |> 
+    subset(glue("risk_{yrs}_all_gt10")) |>
+    mask(stk_rast["whale_area_new"]) |> 
+    global("sum", na.rm=T) |> 
+    pull(sum),
+  pct_risk_reduced_all_gt10_wan = risk_all_gt10_wan / risk_all_gt10,
   # Whale Area BioOp risk (reduced if enacted)
   risk_boem_gt01_wab = stk_rast |> 
     subset(glue("risk_{yrs}_boem_gt01")) |>
@@ -1067,17 +1067,29 @@ d <- tibble(
     mask(stk_rast["whale_area_new"]) |> 
     global("sum", na.rm=T) |> 
     pull(sum),
-  pct_risk_reduced_boem_gt01_wan = risk_boem_gt01_wan / risk_all_gt01)
+  pct_risk_reduced_boem_gt01_wan = risk_boem_gt01_wan / risk_all_gt01,
+  # all Whale Area BioOp risk reduced if enacted on all types
+  risk_all_gt01_wab = stk_rast |> 
+    subset(glue("risk_{yrs}_all_gt01")) |>
+    mask(stk_rast["whale_area_bioop"]) |> 
+    global("sum", na.rm=T) |> 
+    pull(sum),
+  pct_risk_reduced_all_gt01_wab = risk_all_gt01_wab / risk_all_gt01,
+  # all Whale Area New risk (reduced if enacted)
+  risk_all_gt01_wan = stk_rast |> 
+    subset(glue("risk_{yrs}_all_gt01")) |>
+    mask(stk_rast["whale_area_new"]) |> 
+    global("sum", na.rm=T) |> 
+    pull(sum),
+  pct_risk_reduced_all_gt01_wan = risk_all_gt01_wan / risk_all_gt01)
   
-write_csv(d, risk_gt01_reduction_by_areas_csv)
+write_csv(d, risk_reduction_by_areas_csv)
 ```
 
 
 #### tbl_51
 
 ```{r}
-#| label: tbl_51
-#| tbl-cap: 
 
 names(stk_rast) |> sort()
 
@@ -1154,10 +1166,7 @@ all_gt01_avg
 terra::rasterize(ply_ships_w, field="all_gt01_avg")
 
 range(ply_ships_w$area_km2)
-120.6014 131.3593
+# 120.6014 131.3593
 st_area(ply_ships_w)
-
-
-
 ```
 
