@@ -31,7 +31,8 @@ bia_geo      <- here("data/whale_area_bia.geojson")
 whales_n_by_area_csv <- here("data/tbl_whales_n_by_area.csv")
 ships_overview_csv <- here("data/tbl_ships_overview.csv")
 risk_overview_csv <- here("data/tbl_risk_overview.csv")
-risk_reduction_by_areas_csv <- here("data/risk_reduction_by_areas.csv")
+risk_gt10_reduction_by_areas_csv <- here("data/risk_gt10_reduction_by_areas.csv")
+risk_gt01_reduction_by_areas_csv <- here("data/risk_gt01_reduction_by_areas.csv")
 
 # constants ----
 n_whales_Garrison2020 <- 51.3

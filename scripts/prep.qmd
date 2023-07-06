@@ -923,7 +923,7 @@ ply <- ply_ships |>
 
 # hist(ply$val)
 
-map_ply_val(ply, "ships, all (km)", "ships, all (km)", "RdYlGn")
+map_ply_val(ply,"Traffic, all (km)", "Traffic,<br><small>all types,<br>all speeds,<br>avg year<br>(√km)</small>", "RdYlGn")
 ```
 
 ```{r}
@@ -1006,6 +1006,8 @@ write_csv(d, risk_overview_csv)
 ```
 
 ```{r}
+#| label: risk_gt10_reduction_by_areas_csv
+
 d <- tibble(
   yr                = yrs,
   risk_all_gt10  = stk_rast |> 
@@ -1032,7 +1034,42 @@ d <- tibble(
     pull(sum),
   pct_risk_reduced_boem_gt10_wan = risk_boem_gt10_wan / risk_all_gt10)
   
-write_csv(d, risk_reduction_by_areas_csv)
+write_csv(d, risk_gt10_reduction_by_areas_csv)
+```
+
+```{r}
+#| label: risk_gt01_reduction_by_areas_csv
+
+yrs <- 2015:2018
+stk_rast   <- rast(rast_tif)
+
+d <- tibble(
+  yr                = yrs,
+  risk_all_gt01  = stk_rast |> 
+    subset(glue("risk_{yrs}_all_gt01")) |> 
+    global("sum", na.rm=T) |> 
+    pull(sum),
+  risk_boem_gt01 = stk_rast |> 
+    subset(glue("risk_{yrs}_boem_gt01")) |> 
+    global("sum", na.rm=T) |> 
+    pull(sum),
+  pct_boem_gt01     = risk_boem_gt01 / risk_all_gt01,
+  # Whale Area BioOp risk (reduced if enacted)
+  risk_boem_gt01_wab = stk_rast |> 
+    subset(glue("risk_{yrs}_boem_gt01")) |>
+    mask(stk_rast["whale_area_bioop"]) |> 
+    global("sum", na.rm=T) |> 
+    pull(sum),
+  pct_risk_reduced_boem_gt01_wab = risk_boem_gt01_wab / risk_all_gt01,
+  # Whale Area New risk (reduced if enacted)
+  risk_boem_gt01_wan = stk_rast |> 
+    subset(glue("risk_{yrs}_boem_gt01")) |>
+    mask(stk_rast["whale_area_new"]) |> 
+    global("sum", na.rm=T) |> 
+    pull(sum),
+  pct_risk_reduced_boem_gt01_wan = risk_boem_gt01_wan / risk_all_gt01)
+  
+write_csv(d, risk_gt01_reduction_by_areas_csv)
 ```
 
 
@@ -1075,5 +1112,52 @@ write_csv(tbl_51, tbl_51_csv)
 
 tbl_51 <- read_csv(tbl_51_csv)
 kable(tbl_51)
+```
+
+
+```{r}
+#| label: ships_wide_gpkg
+
+ships_wide_gpkg <- here("data/ships_wide.gpkg")
+ships_alb_tif <- here("data/ships_alb.tif")
+
+ply_ships <- read_sf(ships_shp) |> 
+  select(grid_id)
+tbl_ships <- read_csv(ships_csv)
+
+d_ships_w <- tbl_ships |> 
+  filter(
+    is.na(month)) |> 
+  rowwise() |> 
+  mutate(
+    col_year = ifelse(!is.na(year), glue("_{year}"), ""),
+    col_wide = glue("{metric}_{timespan}{col_year}")) |> 
+  select(grid_id, col_wide, value) |> 
+  pivot_wider(
+    names_from = col_wide,
+    values_from = value)
+# ply_ships_w <- ply_ships |> 
+  
+ply_ships_w <- ply_ships |> 
+  left_join(
+    d_ships_w,
+    by = "grid_id")
+write_sf(ply_ships_w, ships_wide_gpkg)
+
+st_bbox(ply_ships_w)
+
+ply_ships_w <- ply_ships_w |> 
+  mutate(
+    area_km2 = st_area(geometry) |> set_units(km^2))
+
+all_gt01_avg
+terra::rasterize(ply_ships_w, field="all_gt01_avg")
+
+range(ply_ships_w$area_km2)
+120.6014 131.3593
+st_area(ply_ships_w)
+
+
+
 ```
 

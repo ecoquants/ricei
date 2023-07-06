@@ -65,9 +65,7 @@ In order to adjust for slight differences from projecting coordinate reference s
 
 <!-- - discuss changing distribution -->
 
-The whales are concentrated along the strip from 100 to 400 m, as depicted in @fig-map-whales-new, now extending into the Western Gulf of Mexico compared to the 
-
-
+Compared to the original distribution (@fig-map-whales-old), the whales are now concentrated along the strip from 100 to 400 m extending into the Western Gulf of Mexico (@fig-map-whales-new).
 
 ```{r}
 #| label: fig-map-whales-old
@@ -75,12 +73,15 @@ The whales are concentrated along the strip from 100 to 400 m, as depicted in @f
 
 map_rast(
   r = rast(whales_roberts2016_img), 
-  legend_title = "whales<br><small>(Roberts, 2016)<br>(# / 100 km<sup>2</sup>)</small>",
+  legend_title = "Whales<br><small>(Roberts, 2016)<br>(# / 100 km<sup>2</sup>)</small>",
   group = "whales_per_100km2_Roberts2016",
   add_depth_contours =T,
   add_ply_wab = T)
 ```
 
+The original Whale Area is described [p. 292 of @nmfsBiologicalOpinionFederally2020] as:
+
+> This opinion defines the Bryde’s whale area to include the area from 100- to 400- meter isobaths from 87.5° W to 27.5° N as described in the status review (Rosel 2016) plus an additional 10 km around that area.
 
 ```{r}
 #| label: fig-map-whales-new
@@ -88,7 +89,7 @@ map_rast(
 
 map_rast(
   r = stk_rast["whales_avg_n_per_100km2"], 
-  legend_title = "whales<br><small>(Litz, 2022)<br>(# / 100 km<sup>2</sup>)</small>",
+  legend_title = "Whales<br><small>(Litz, 2022)<br>(# / 100 km<sup>2</sup>)</small>",
   group = "whales_per_100km2_Litz2022",
   add_depth_contours=T,
   add_ply_wan = T)
@@ -127,28 +128,28 @@ d |>
 #| label: fig-ships-avg-all-gt01
 #| fig-cap: "Map of annual average traffic (km) for all vessel types at all speeds from AIS data (2014 to 2018)."
 
-map_rast(stk_rast["ships_avg_all_gt01"], "vessel traffic,<br>all types,<br>all speeds,<br><small>annual avg<br>(km)</small>", "RdYlGn")
+map_rast(stk_rast["ships_avg_all_gt01"], "Traffic,<br><small>all types,<br>all speeds,<br>avg year<br>(km)</small>", "RdYlGn")
 ```
 
 ```{r}
 #| label: fig-ships-avg-boem-gt01
 #| fig-cap: "Map of annual average traffic (km) for oil and gas vessels at all speeds from AIS data (2014 to 2018)."
 
-map_rast(stk_rast["ships_avg_boem_gt01"], "vessel traffic,<br>oil & gas,<br>all speeds,<br><small>annual avg<br>(km)</small>", "RdYlGn")
+map_rast(stk_rast["ships_avg_boem_gt01"], "Traffic,<br><small>oil & gas,<br>all speeds,<br>avg year<br>(km)</small>", "RdYlGn")
 ```
 
 ```{r}
 #| label: fig-ships-avg-all-gt10
 #| fig-cap: "Map of annual average traffic (km) for all vessel types > 10 knots from AIS data (2014 to 2018)."
 
-map_rast(stk_rast["ships_avg_all_gt01"], "vessel traffic,<br>all types,<br>> 10 knots,<br><small>annual avg<br>(km)</small>", "RdYlGn")
+map_rast(stk_rast["ships_avg_all_gt01"], "Traffic,<br><small>all types,<br>> 10 knots,<br>avg year<br>(km)</small>", "RdYlGn")
 ```
 
 ```{r}
 #| label: fig-ships-avg-boem-gt10
 #| fig-cap: "Map of annual average traffic (km) for oil and gas vessels > 10 knots from AIS data (2014 to 2018)."
 
-map_rast(stk_rast["ships_avg_boem_gt01"], "vessel traffic,<br>oil & gas,<br>> 10 knots,<br><small>annual avg<br>(km)</small>", "RdYlGn")
+map_rast(stk_rast["ships_avg_boem_gt01"], "Traffic,<br><small>oil & gas,<br>> 10 knots,<br>avg year<br>(km)</small>", "RdYlGn")
 ```
 
 
@@ -160,7 +161,7 @@ map_rast(stk_rast["ships_avg_boem_gt01"], "vessel traffic,<br>oil & gas,<br>> 10
 #| fig-cap: "Map of risk (# whales * km vessel traffic) for all vessels at all speeds."
 
 stk_rast["risk_avg_all_gt01"] |> 
-  map_rast("risk,<br>all vessels,<br>all speeds <br><small>(# whales * km traffic)</small>", "RdYlGn")
+  map_rast("Risk,<br><small>all types,<br>all speeds<br>(# * km)</small>", "RdYlGn")
 ```
 
 
@@ -169,7 +170,7 @@ stk_rast["risk_avg_all_gt01"] |>
 #| fig-cap: "Map of risk (# whales * km vessel traffic) for oil and gas vessels > 10 knots."
 
 stk_rast["risk_avg_boem_gt10"] |> 
-  map_rast("risk,<br>oil & gas,<br>> 10 knots <br><small>(# whales * km traffic)</small>", "RdYlGn")
+  map_rast("Risk,<br><small>oil & gas,<br>> 10 knots <br>(# * km)</small>", "RdYlGn")
 ```
 
 The overall vessel strike risk to Rice's whale is presented in @tbl-risk-overview \[similar to Table 49 [@nmfsBiologicalOpinionFederally2020]\].
@@ -203,10 +204,10 @@ d |>
 
 
 ```{r}
-#| label: tbl-risk-reducction-by-areas
+#| label: tbl-risk-gt10-reduction-by-areas
 #| tbl-cap: "Reduction of vessel strike risk over 10 knots (# whales * km vessel traffic) to Rice's whales with enforcement of proposed mitigation areas for oil and gas vessels."
 
-d <- read_csv(risk_reduction_by_areas_csv) |> 
+d <- read_csv(risk_gt10_reduction_by_areas_csv) |> 
   # names() |> paste(collapse=", ")
   select(yr, risk_boem_gt10_wab, pct_risk_reduced_boem_gt10_wab, risk_boem_gt10_wan, pct_risk_reduced_boem_gt10_wan) |> 
   mutate(
@@ -226,13 +227,44 @@ col_names <- c(
   "Vessel Strike Risk for Oil and Gas Vessel Traffic > 10 knots within the Original Whale Area (NMFS, 2020; Figure 1)" = "risk_boem_gt10_wab",
   "Proportion of Risk Reduction to All Vessel Traffic through Enforcement on Oil & Gas Vessels of the Original Whale Area (NMFS, 2020; Figure 1)" = "pct_risk_reduced_boem_gt10_wab",
   "Vessel Strike Risk for Oil and Gas Vessel Traffic > 10 knots within the New Whale Area (NMFS, 2020; Figure 2)" = "risk_boem_gt10_wan",
-  "Proportion of Risk Reduction to All Vessel Traffic through Enforcement on Oil & Gas Vessels of the New Whale Area (NMFS, 2020; Figure 2)" = "pct_risk_reduced_boem_gt10_wan")
+  "Proportion of Risk Reduction to All Vessel Traffic through Enforcement on Oil & Gas Vessels of the New Whale Area (Figure 2)" = "pct_risk_reduced_boem_gt10_wan")
 
 d |> 
   rename(all_of(col_names)) |> 
   kable()
 ```
 
+
+```{r}
+#| label: tbl-risk-gt01-reduction-by-areas
+#| tbl-cap: "Reduction of vessel strike risk at all speeds (# whales * km vessel traffic) to Rice's whales with enforcement of proposed mitigation areas for oil and gas vessels."
+
+d <- read_csv(risk_gt01_reduction_by_areas_csv) |> 
+  # names() |> paste(collapse=", ")
+  select(yr, risk_boem_gt01_wab, pct_risk_reduced_boem_gt01_wab, risk_boem_gt01_wan, pct_risk_reduced_boem_gt01_wan) |> 
+  mutate(
+    # risk_all_gt01  = round(risk_all_gt01)  |> format(big.mark = ","),
+    # risk_boem_gt01 = round(risk_boem_gt01) |> format(big.mark = ","),
+    # pct_boem_gt01  = percent(pct_boem_gt01, accuracy=1),
+    risk_boem_gt01_wab             = round(risk_boem_gt01_wab)  |> format(big.mark = ","),
+    pct_risk_reduced_boem_gt01_wab = percent(pct_risk_reduced_boem_gt01_wab, accuracy=1),
+    risk_boem_gt01_wan             = round(risk_boem_gt01_wan) |> format(big.mark = ","),
+    pct_risk_reduced_boem_gt01_wan = percent(pct_risk_reduced_boem_gt01_wan, accuracy=1))
+# names(d) |> paste(collapse= '",\n"" = "') |> cat()
+col_names <- c(
+  "Year" = "yr",
+  # "Vessel Strike Risk for All Vessel Traffic > 10 knots" = "risk_all_gt01",
+  # "Vessel Strike Risk for Oil and Gas Vessel Traffic > 10 knots" = "risk_boem_gt01",
+  # "Proportion of Vessel Strike Risk due to Oil and Gas Vessel Traffic All Speeds" = "pct_boem_gt01",
+  "Vessel Strike Risk for Oil and Gas Vessel Traffic at all speeds within the Original Whale Area (NMFS, 2020; Figure 1)" = "risk_boem_gt01_wab",
+  "Proportion of Risk Reduction to All Vessel Traffic through Enforcement on Oil & Gas Vessels of the Original Whale Area (NMFS, 2020; Figure 1)" = "pct_risk_reduced_boem_gt01_wab",
+  "Vessel Strike Risk for Oil and Gas Vessel Traffic at all speeds within the New Whale Area (Figure 2)" = "risk_boem_gt01_wan",
+  "Proportion of Risk Reduction to All Vessel Traffic through Enforcement on Oil & Gas Vessels of the New Whale Area (NMFS, 2020; Figure 2)" = "pct_risk_reduced_boem_gt01_wan")
+
+d |> 
+  rename(all_of(col_names)) |> 
+  kable()
+```
 
 
 
