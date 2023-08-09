@@ -1,7 +1,8 @@
 # packages ----
 librarian::shelf(
-  dplyr, fs, geojsonsf, ggplot2, ggspatial, glue, here, janitor, knitr, leafem, 
+  classInt, dplyr, fs, geojsonsf, ggplot2, ggspatial, glue, gt, here, janitor, knitr, leafem, 
   leaflet, leaflet.extras, lwgeom, mapview, mregions, noaa-onms/onmsR, purrr, 
+  rnaturalearth,
   readr, readxl, scales, sf, stars, stringr, terra, tibble, tidyr, units,
   quiet = T)
 # select = dplyr::select
@@ -277,6 +278,147 @@ map_rast <- function(
       addLayersControl(
         overlayGroups = lyrs,
         options = layersControlOptions(collapsed = T))
+  
+  if (add_mouseCoordinates)
+    m <- addMouseCoordinates(m)
+  
+  if (add_fullScreenControl)
+    m <- addFullscreenControl(m)
+  
+  m
+}
+
+map_rast_jenks <- function(
+    r, 
+    legend_title, 
+    colors             = "Spectral",
+    group              = "raster",
+    n_breaks           = 7,
+    fillOpacity        = 1,
+    add_depth_contours = T,
+    add_ply_bia        = F,
+    add_ply_wab        = F,
+    add_ply_wan        = F,
+    add_zoomControl        = knitr::is_html_output(),
+    add_attributionControl = knitr::is_html_output(),
+    add_fullScreenControl  = knitr::is_html_output(),
+    add_layersControl      = knitr::is_html_output(),
+    add_mouseCoordinates   = knitr::is_html_output()){
+  # legend             = "whales<br><small>(# / 100 km<sup>2</sup>)</small>"
+  # colors             = "Spectral"
+  # zoomControl        = T
+  # attributionControl = T
+  # fullScreenControl  = T
+  # fillOpacity        = 1
+  # add_depth_contours = T
+  
+  # browser()
+  v <- values(r, na.rm=T)[,1]
+  brks <- classInt::classIntervals(v, style = "fisher", n=n_breaks)$brks
+  stopifnot(min(brks) <= min(v) & max(brks) >= max(v))
+  
+  pal <- colorBin(colors, bins = brks, pretty = T, reverse = T, na.color = "transparent")
+  
+  n_arrow_img <- "https://cdn.pixabay.com/photo/2013/07/12/17/54/arrow-152596_960_720.png"
+  
+  m <- leaflet(
+    options = leafletOptions(
+      zoomControl        = add_zoomControl,
+      attributionControl = add_attributionControl)) |>
+    addProviderTiles(
+      "Esri.OceanBasemap",
+      options = providerTileOptions(
+        variant = "Ocean/World_Ocean_Base")) |>
+    addProviderTiles(
+      "Esri.OceanBasemap",
+      options = providerTileOptions(
+        variant = "Ocean/World_Ocean_Reference")) |> 
+    addRasterImage(
+      r, project = F,
+      colors = pal,
+      group  = group) |> 
+    addScaleBar(
+      position = c("bottomleft")) |> 
+    leafem::addLogo(n_arrow_img) |> 
+    addLegend(
+      pal      = pal, 
+      values   = v, 
+      opacity  = 0.7, 
+      title    = legend_title,
+      labFormat = labelFormat(
+        # digits=1, between = ' <br> &nbsp;&nbsp;&ndash; '),
+        digits=1, between = ' <br> &nbsp;&nbsp; to '),
+      position = "topright")
+  
+  lyrs <- c(group)
+  
+  if (add_depth_contours){
+    grps  <- c("100 m contour", "400 m contour")
+    cols  <- c("black", "black")
+    wts   <- c(1, 2)
+    dashs <- c("5", "10")
+    
+    m <- m |> 
+      addPolylines(
+        data = lns_depth_contours |> 
+          filter(depth_m == "100"),
+        group = grps[1],
+        color = cols[1], opacity = 1.0,
+        weight = wts[1], dashArray = dashs[1]) |> 
+      addPolylines(
+        data = lns_depth_contours |> 
+          filter(depth_m == "400"),
+        group = grps[2],
+        color = cols[2], opacity = 1.0,
+        weight = wts[2], dashArray = dashs[2])
+    
+    lyrs <- c(lyrs, grps)
+  }
+  
+  if (add_ply_bia){ # whale area - Biologically Important Area (LaBrecque, 2016)
+    grp <- "Bio. Imp. Area (LaBrecque, 2016)"
+    
+    m <- m |> 
+      addPolygons(
+        data = ply_bia, 
+        color="pink", fill = F, 
+        opacity = 1.0, weight=2,
+        group = grp)
+    
+    lyrs <- c(lyrs, grp)
+  }
+  
+  if (add_ply_wab){ # whale area - Biogical Opinion (NOAA, 2020)
+    grp <- "Whale Area (NOAA, 2020)"
+    
+    m <- m |> 
+      addPolygons(
+        data = ply_wab, 
+        color="purple", fill = F, 
+        opacity = 1.0, weight=2,
+        group = grp)
+    
+    lyrs <- c(lyrs, grp)
+  }
+  
+  if (add_ply_wan){ # whale area - New
+    grp <- "Whale Area, New"
+    
+    m <- m |> 
+      addPolygons(
+        data = ply_wan, 
+        color="red", fill = F, 
+        opacity = 1.0, weight=2,
+        group = grp)
+    
+    lyrs <- c(lyrs, grp)
+  }
+  
+  if (add_layersControl)
+    m <- m |> 
+    addLayersControl(
+      overlayGroups = lyrs,
+      options = layersControlOptions(collapsed = T))
   
   if (add_mouseCoordinates)
     m <- addMouseCoordinates(m)
