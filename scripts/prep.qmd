@@ -23,18 +23,22 @@ source(here("scripts/paths.R"))
 # transform all to geographic projection (4326)
 
 if (!all(file.exists(c(
-  study_geo, units_gpkg, ships_csv, whales_csv)))){
+  study_gpkg, ships_csv, whales_csv)))){
   
   # ships
   grid_ships <- read_sf(ships_shp) |> 
-    select(grid_id) |> 
-    st_transform(4326)
+    select(grid_id)
+  # mapView(grid_ships)
+  # grid_ships
+  # WGS_1984_Albers
+  prj <- st_crs(grid_ships)
   
   # whales
   hex_whales <- read_sf(whales_shp) |> 
     rename(hex_id = HEXID) |> 
     clean_names() |> 
-    st_transform(4326)
+    st_transform(prj)
+  # mapView(hex_whales)
   
   # wind: BOEM wind energy planning areas
   # st_layers(wind_gdb)
@@ -50,8 +54,8 @@ if (!all(file.exists(c(
   # 2   Option_I       Polygon        1      6 NAD83 / Conus Albers
   ply_wea <- map(st_layers(wea_gdb)$name, \(lyr) read_sf(wea_gdb, lyr)) |> 
     bind_rows() |> 
-    st_transform(4326)
-  # mapview(ply_wea)
+    st_transform(prj)
+  # mapView(ply_wea)
   
   #  <- tibble(
   #   layer = ) |> 
@@ -69,39 +73,78 @@ if (!all(file.exists(c(
   # study area ----
   # as intersection of all dissolved (st_union) inputs: whales, ships, eez
   if (!file.exists(study_geo)){
+    
     # eez
     us_eez <- mr_features_get(
       type      = "MarineRegions:eez",
       featureID = "eez.281")  |>
       geojson_sf() |> 
-      st_transform(4326) # mapview(us_eez)
+      st_transform(prj) # mapView(us_eez)
     
-    # intersect all
-    ply_study <- st_union(grid_ships) |> 
+    grid_ships_u <- st_union(grid_ships)
+    hex_whales_u <- st_union(hex_whales)
+    
+    grid_ships_u_buf100km <- grid_ships_u |> 
+      st_buffer(100000)
+    # mapView(grid_ships_u)
+    # mapView(grid_ships_u_buf100km)
+    
+    land <- rnaturalearth::ne_download(
+      scale       = 10, # 10 m (fine scale)
+      type        = "land", 
+      category    = "physical",
+      returnclass = "sf") |>
       st_intersection(
-        st_union(hex_whales)) |> 
-      st_intersection(
-        us_eez)
+        grid_ships_u_buf100km |> 
+          st_transform(4326)) |> 
+      st_transform(prj) |> 
+      st_union()
+    # mapView(land)
+    
+    ply_cells <- st_difference(
+      grid_ships, land)
+    mapView(ply_cells)
+    
+    # mapView(grid_ships_union)
+    # mapView(hex_whales_u)
+    
+    # erase grid_ships from land
+    ply_study <- grid_ships_u |> 
+      st_difference(land)
+    # mapView(ply_study)
     
     # write geojson
-    write_sf(ply_study, study_geo)
+    write_sf(ply_study, study_gpkg, delete_dsn = T)
   }
-  ply_study <- read_sf(study_geo)
+  ply_study <- read_sf(study_gpkg)
   
   # break up study area into smaller polygons for faster intersecting
-  sf_use_s2(F)
-  plys_study <- st_subdivide(ply_study, 1000) |> 
-    st_cast() |> 
-    st_make_valid()
-  sf_use_s2(T)
-  stopifnot( sum(!st_is_valid(plys_study)) == 0)
+  # sf_use_s2(F)
+  # plys_study <- st_subdivide(ply_study, 1000) |> 
+  #   st_cast() |> 
+  #   st_make_valid()
+  # sf_use_s2(T)
+  # stopifnot( sum(!st_is_valid(plys_study)) == 0)
   
   # cells: common raster output ----
   if (!all(file.exists(c(cells_geo)))){
     
-    bb <- ply_study |> 
-      st_transform(3857) |> 
-      ext()
+    ply_cells_sq <- grid_ships |> 
+      st_filter(ply_study, .predicate = st_intersects)
+    # mapView(ply_cells)
+    
+    ply_cells <- grid_ships |> 
+      st_intersection(ply_study)
+    
+    # ply_cells_0 <- ply_cells
+    ply_cells <- ply_cells |> 
+      mutate(
+        area_km2 = st_area(geometry) |> set_units(km^2))
+    # summary(ply_cells$area_km2)
+    #    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+    #   122.1   124.7   126.0   126.0   127.2   129.8 
+    
+    bb <- ext(ply_cells)
     # Roberts et al (2016b): # animals / 100 km^2
     # librarian::shelf(raster)
     # r <- raster(here("data/raw/whales/Duke_GOM_Brydes_whale/GOM_Brydes_whale_abundance.img"))
