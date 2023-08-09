@@ -102,6 +102,8 @@ map_rast(
 #| label: tbl-whales-by-area
 #| tbl-cap: Table of new whale densities (Litz et al. 2022) summarized by total study area (U.S. Gulf of Mexico), previous Whale Area (NMFS 2020) and newly proposed Whale Area.
 
+# Manual docx: mv tbl outside figure table. Reference > Insert Caption. Add Table 1 and Insert Hyperlink to This Document "tbl-whales-by-area" to replace "?@tbl-whales-by-area".
+
 a <- read_csv(whales_n_by_area_csv)
 
 d <- tribble(
