@@ -6,3 +6,5 @@
 rosm.cache
 _tmp_*
 ~$*.docx
+_test.*
+_test_files
