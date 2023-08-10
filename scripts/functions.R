@@ -347,7 +347,7 @@ map_rast_jenks <- function(
       title    = legend_title,
       labFormat = labelFormat(
         # digits=1, between = ' <br> &nbsp;&nbsp;&ndash; '),
-        digits=1, between = ' <br> &nbsp;&nbsp; to '),
+        digits=0, between = ' <br>&nbsp;&nbsp;– '),
       position = "topright")
   
   lyrs <- c(group)

@@ -33,7 +33,7 @@ knitr::opts_chunk$set(
 source(here::here("scripts/functions.R"))
 source(here("scripts/paths.R"))
 
-ply_study  <- read_sf(study_gpkg)
+ply_study  <- read_sf(study_geo)
 ply_cells  <- read_sf(cells_geo)
 ply_units  <- read_sf(units_gpkg)
 ply_ships  <- read_sf(ships_geo)
@@ -48,12 +48,21 @@ stk_rast   <- rast(rast_tif)
 r_cells    <- stk_rast["cell_id"]
 tbl_units <- ply_units |> 
   st_drop_geometry()
-
-# TODO:
-# ck for vestigial branch 1-re-analyze-with-native-vessel-traffic-grid-and-projection in:
-# * [new gt tables, pre docx fixes · ecoquants/ricei@7c985bd](https://github.com/ecoquants/ricei/commit/7c985bd56ed7bb646771cbecb0b2faee890683f3#diff-e3f1031c3432f4ea60576aaeab139998a814f42691c957ab49f42c04642f9222)
-# 2. check Table 3: Oil & Gas both speeds, divider? update to divide by whole area for given type & speed.
 ```
+
+```{r}
+#| label: docx-fixes
+#| eval: !expr "!knitr::is_html_output()"
+#| results: asis
+  
+cat("
+## TODO: docx manual fixes  {.unnumbered}
+
+- [ ] Find `?(caption)` instances and drop. Move table outside figure table if present (helps to turn on Paragraph marks). Place cursor just inside table, Reference > Insert Caption. Copy & paste from HTML output.
+- [ ] Replace all missed `gt` table references `?@` with `Table #` hyperlink.
+- [ ] Delete this heading and section, update ToC.")
+```
+
 
 ## Abstract
 
@@ -107,8 +116,6 @@ map_rast(
 #| label: tbl-whales-by-area
 #| tbl-cap: Table of new whale densities (Litz et al. 2022) summarized by total study area (U.S. Gulf of Mexico), previous Whale Area (NMFS 2020) and newly proposed Whale Area.
 
-# Manual docx: mv tbl outside figure table. Reference > Insert Caption. Add Table 1 and Insert Hyperlink to This Document "tbl-whales-by-area" to replace "?@tbl-whales-by-area".
-
 a <- read_csv(whales_n_by_area_csv)
 
 d <- tribble(
@@ -128,43 +135,49 @@ d |>
 
 ## Vessel Traffic
 
-In order to evaluate the threat of ship strike to Rice's whales, we used the same AIS data from 2014 to 2018 as the Biological Opinion [@nmfsBiologicalOpinionFederally2020]. This data is based on a grid of cells ~126 km^2^ in Albers equal area projection. Traffic in terms of kilometers (km) traversed within a cell was differentiated based on speed (≤  10 knots or > 10 knots) and type (oil & gas or all types).
+In order to evaluate the threat of ship strike to Rice's whales, we used the same AIS data from 2014 to 2018 as the Biological Opinion [@nmfsBiologicalOpinionFederally2020]. This data is based on a grid of cells ~126 km^2^ in Albers equal area projection. Traffic in terms of kilometers (km) traversed within a cell was differentiated based on speed (≤  10 knots or > 10 knots) and type (oil & gas or all types). In order to produce maps similar to the original Biological Opinion [@nmfsBiologicalOpinionFederally2020] showing spatial variation, colors were assigned to the Jenks natural breaks of the distribution of values (Figures [-@fig-ships-avg-all-gt01], [-@fig-ships-avg-boem-gt01], [-@fig-ships-avg-all-gt10], [-@fig-ships-avg-boem-gt10]).
 
 ```{r}
 #| label: fig-ships-avg-all-gt01
-#| fig-cap: "Map of annual average traffic (km) for all vessel types at all speeds from AIS data (2014 to 2018)."
+#| fig-cap: "Map of annual average traffic (km) for all vessel types at all speeds from AIS data (2014 to 2018). Depth contours are shown in dash blacked lines for 100 m (finer) and 400 m (thicker)."
 
 map_rast_jenks(stk_rast["ships_avg_all_gt01"], "Traffic,<br><small>all types,<br>all speeds,<br>avg year<br>(km)</small>", "RdYlGn")
 ```
 
 ```{r}
 #| label: fig-ships-avg-boem-gt01
-#| fig-cap: "Map of annual average traffic (km) for oil and gas vessels at all speeds from AIS data (2014 to 2018)."
+#| fig-cap: "Map of annual average traffic (km) for oil and gas vessels at all speeds from AIS data (2014 to 2018). Depth contours are shown in dash blacked lines for 100 m (finer) and 400 m (thicker)."
 
 map_rast_jenks(stk_rast["ships_avg_boem_gt01"], "Traffic,<br><small>oil & gas,<br>all speeds,<br>avg year<br>(km)</small>", "RdYlGn")
 ```
 
 ```{r}
 #| label: fig-ships-avg-all-gt10
-#| fig-cap: "Map of annual average traffic (km) for all vessel types > 10 knots from AIS data (2014 to 2018)."
+#| fig-cap: "Map of annual average traffic (km) for all vessel types > 10 knots from AIS data (2014 to 2018). Depth contours are shown in dash blacked lines for 100 m (finer) and 400 m (thicker)."
 
 map_rast_jenks(stk_rast["ships_avg_all_gt01"], "Traffic,<br><small>all types,<br>> 10 knots,<br>avg year<br>(km)</small>", "RdYlGn")
 ```
 
 ```{r}
 #| label: fig-ships-avg-boem-gt10
-#| fig-cap: "Map of annual average traffic (km) for oil and gas vessels > 10 knots from AIS data (2014 to 2018)."
+#| fig-cap: "Map of annual average traffic (km) for oil and gas vessels > 10 knots from AIS data (2014 to 2018). Depth contours are shown in dash blacked lines for 100 m (finer) and 400 m (thicker)."
 
 map_rast_jenks(stk_rast["ships_avg_boem_gt01"], "Traffic,<br><small>oil & gas,<br>> 10 knots,<br>avg year<br>(km)</small>", "RdYlGn")
 ```
 
-
 ## Vessel Risk to Whales
 
+The vessel risk ($R$) to whales is calculated as a simple multiplication of number of whales ($W$) and km of vessel traffic ($V$) (@eq-risk).
+
+$$
+R = W * V
+$$ {#eq-risk}
+
+This risk ($R$) can be further differentiated by vessel ($V$) type and speed (Figures [-@fig-risk-avg-all-gt01], [-@fig-risk-avg-boem-gt10]; Table [@tbl-risk-overview]).
 
 ```{r}
 #| label: fig-risk-avg-all-gt01
-#| fig-cap: "Map of risk (# whales * km vessel traffic) for all vessels at all speeds."
+#| fig-cap: "Map of risk (# whales * km vessel traffic) for all vessels at all speeds. Depth contours are shown in dash blacked lines for 100 m (finer) and 400 m (thicker)."
 
 stk_rast["risk_avg_all_gt01"] |> 
   map_rast("Risk,<br><small>all types,<br>all speeds<br>(# * km)</small>", "RdYlGn")
@@ -173,13 +186,11 @@ stk_rast["risk_avg_all_gt01"] |>
 
 ```{r}
 #| label: fig-risk-avg-boem-gt10
-#| fig-cap: "Map of risk (# whales * km vessel traffic) for oil and gas vessels > 10 knots."
+#| fig-cap: "Map of risk (# whales * km vessel traffic) for oil and gas vessels > 10 knots. Depth contours are shown in dash blacked lines for 100 m (finer) and 400 m (thicker)."
 
 stk_rast["risk_avg_boem_gt10"] |> 
   map_rast("Risk,<br><small>oil & gas,<br>> 10 knots <br>(# * km)</small>", "RdYlGn")
 ```
-
-The overall vessel strike risk to Rice's whale is presented in @tbl-risk-overview \[similar to Table 49 [@nmfsBiologicalOpinionFederally2020]\].
 
 ```{r}
 #| label: tbl-risk-overview
@@ -238,11 +249,11 @@ d |>
       risk_all, risk_boem, pct_boem))
 ```
 
-Reference @tbl-risk-reduction-by-areas.
+Finally, we can evaluate the risk reduction of the original Whale Area proposed in the Biological Opinion [@nmfsBiologicalOpinionFederally2020] compared with the newly proposed Whale Area encompassing the wider Gulf of Mexico [@tbl-risk-reduction-by-areas].
 
 ```{r}
 #| label: tbl-risk-reduction-by-areas
-#| tbl-cap: "Reduction of vessel strike risk from oil and gas vessel traffic (# whales * km vessel traffic) to Rice's whales with enforcement of proposed mitigation areas for oil and gas vessels."
+#| tbl-cap: "Reduction of vessel strike risk (# whales * km vessel traffic) to Rice's whales with enforcement of original (NMFS 2020) and new Whale Areas. All percentage (%) reductions are compared to All Vessels for given speeds."
 
 d <- read_csv(risk_reduction_by_areas_csv) |> 
   select(yr, matches("wan|wab$")) |> 
@@ -314,12 +325,9 @@ d |>
     columns = yr)
 ```
 
-
 ## Reproducible Results
 
-## Conclusions
-
-
+This report was produced using the principles of reproducible research [@lowndesOurPathBetter2017] with the R programming language [@rcoreteamLanguageEnvironmentStatistical2023]. Statistical analysis were performed using the libraries and methods of the [`tidyverse`](https://www.tidyverse.org/) [@wickhamWelcomeTidyverse2019] and spatial features [`sf`](https://r-spatial.github.io/sf/index.html) [@pebesmaJournalSimpleFeatures2018] output to a [Quarto](https://quarto.org/) document [@allaireQuartoInterfaceQuarto2022]. All source code is available in the Github repository [github.com/ecoquants/ricei](https://github.com/ecoquants/ricei). The interactive version of this report is available at [ecoquants.com/ricei](https://ecoquants.com/ricei).
 
 ## References {.unnumbered}
 
