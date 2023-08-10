@@ -18,7 +18,7 @@ whales_geo  <- here("data/whales.geojson") # hex_id:  whale densities by hexagon
 ships_geo   <- here("data/ships.geojson")  # grid_id: ship traffic by grid
 cells_geo   <- here("data/cells.geojson")  # cell_id: cells for output rasters
 units_gpkg  <- here("data/units.gpkg")     # unit_id: unit intersections for analysis
-study_gpkg  <- here("data/study.gpkg")
+study_geo  <- here("data/study.geojson")
 ships_csv   <- here("data/ships.csv")
 whales_csv  <- here("data/whales.csv")
 rast_tif    <- here("data/rasters.tif")

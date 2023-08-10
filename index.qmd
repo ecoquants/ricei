@@ -48,6 +48,11 @@ stk_rast   <- rast(rast_tif)
 r_cells    <- stk_rast["cell_id"]
 tbl_units <- ply_units |> 
   st_drop_geometry()
+
+# TODO:
+# ck for vestigial branch 1-re-analyze-with-native-vessel-traffic-grid-and-projection in:
+# * [new gt tables, pre docx fixes · ecoquants/ricei@7c985bd](https://github.com/ecoquants/ricei/commit/7c985bd56ed7bb646771cbecb0b2faee890683f3#diff-e3f1031c3432f4ea60576aaeab139998a814f42691c957ab49f42c04642f9222)
+# 2. check Table 3: Oil & Gas both speeds, divider? update to divide by whole area for given type & speed.
 ```
 
 ## Abstract
@@ -287,7 +292,7 @@ d <- d |>
 
 d |> 
   group_by(speed, type) |> 
-  gt() |> 
+  gt(rowname_col = "year") |> 
   fmt_number(decimals=0) |>  # c(risk_all, risk_boem), 
   fmt_percent(c(
     pctriskreduced_wab,
@@ -303,11 +308,18 @@ d |>
     label = "Risk Reduction by Area",
     columns = c(
       risk_wab, pctriskreduced_wab, 
-      risk_wan, pctriskreduced_wan))
+      risk_wan, pctriskreduced_wan)) |> 
+  cols_align(
+    align   = "right",
+    columns = yr)
 ```
 
 
 ## Reproducible Results
+
+## Conclusions
+
+
 
 ## References {.unnumbered}
 
