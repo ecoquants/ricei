@@ -423,12 +423,15 @@ if (!all(file.exists(c(
 ## Whale Density
 
 ```{r}
+stk_rast   <- rast(rast_tif)
+
 lyr <- "whales_avg_n_per_100km2"
+
 r0 <- calc_lyr(
     lyr,
     timespan == "avg" &
       metric   == "n_per_km2",
-    redo = T)
+    redo = F)
 
 # adjust cells so sum equals the reported number  
 sum_r <- global(r0, "sum", na.rm=T)[[1]]        # 67.24308
@@ -450,6 +453,8 @@ stopifnot(
 100 & 400 m contour lines from GEBCO
 
 ```{r}
+ply_study  <- read_sf(study_geo)
+
 # read depth from GEBCO
 r_depth <- rast(depth_tif) |> 
   mask(ply_study) * -1
@@ -511,14 +516,15 @@ lns_depth <- read_sf(depth_contours_geo)
 
 
 ```{r}
+r_lon <- init(r_depth, "x")
+r_lat <- init(r_depth, "y")
+
 # ply_bia ----
 ply_bia <- read_sf(bia_shp, quiet = T) |> 
   filter(cmn_name == "Bryde's whale")
 write_sf(ply_bia, bia_geo)
 
 # get Whale Area from BioOp (wab) ----
-r_lon <- init(r_depth, "x")
-r_lat <- init(r_depth, "y")
 r_wab <- (
   r_depth >= 100 &
   r_depth <= 400 & 
@@ -586,6 +592,52 @@ r_wan <- ply_wan |>
 r_wan <- add_lyr(r_wan, "whale_area_new")
 
 stk_rast   <- rast(rast_tif)
+# names(stk_rast)
+
+
+# get Whale Area New, Buffered (wau) ----
+ply_wau <- as.polygons(r_wan) |> 
+  st_as_sf() |> 
+  rename(value = 1) |> 
+  filter(value == 1) |> 
+  st_cast("POLYGON") |> 
+  st_buffer(10000) |>
+  mutate(
+    area_km2 = st_area(geometry) |> set_units("km^2")) |> 
+  arrange(desc(area_km2)) |> 
+  head(1)
+# mapView(ply_wab) + 
+#   mapView(ply_wan) + 
+#   mapView(ply_bia) + 
+#   mapView(ply_whales01)
+write_sf(ply_wau, wau_geo, delete_dsn = T)
+
+r_wau <- ply_wau |> 
+  st_transform(3857) |> 
+  rasterize(r_cells, 1)
+# plet(r_wan, tiles=providers$Stamen.TonerLite)
+r_wau <- add_lyr(r_wau, "whale_area_newbuf")
+
+stk_rast   <- rast(rast_tif)
+
+# all whales
+stk_rast["whales_avg_n_per_100km2"] |> 
+  global(sum, na.rm=T) # 51.3
+# old whale area
+stk_rast["whales_avg_n_per_100km2"] |> 
+  mask(stk_rast["whale_area_bioop"]) |> 
+  global(sum, na.rm=T) # 26.56211 / 51.3 = 51.77799%
+# new whale area
+stk_rast["whales_avg_n_per_100km2"] |> 
+  mask(subset(stk_rast, "whale_area_new")) |> 
+  global(sum, na.rm=T) # 48.46627 / 51.3 = 94.47616%
+# new whale area, buffered
+stk_rast["whales_avg_n_per_100km2"] |> 
+  mask(subset(stk_rast, "whale_area_newbuf")) |> 
+  global(sum, na.rm=T) # 50.2517 / 51.3 = 97.95653%
+
+global(stk_rast["whales_avg_n_per_100km2"], sum, na.rm=T)
+
 # names(stk_rast)
 
 # map whale areas (bia, wab, wan) ----

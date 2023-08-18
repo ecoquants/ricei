@@ -1,5 +1,5 @@
 ---
-title: "Spatial analysis of ship strike risk for Rice’s whale in the Gulf of Mexico"
+title: "Spatial analysis of ship-strike risk for Rice’s whale in the Gulf of Mexico"
 author: "Benjamin D. Best, Ph.D. (<ben@ecoquants.com>)"
 date: now
 date-format: "YYYY-MM-DD HH:mm (z)"
@@ -63,23 +63,27 @@ cat("
 - [ ] Delete this heading and section, update ToC.")
 ```
 
-
 ## Abstract
 
-Since release of the Biological Opinion on oil and gas activities in the Gulf of Mexico [@nmfsBiologicalOpinionFederally2020] that used a published density surface model [@robertsHabitatbasedCetaceanDensity2016] to describe the distribution of the critically endangered Rice's whale (_Balaenoptera ricei_), a new density surface model [@litzCetaceanSeaTurtle2022] has been made available. Importantly, this model extends the distribution of Rice's whale beyond its initial core habitat in the Eastern Gulf of Mexico to the West, where it had previously only been acoustically detected [@soldevillaRiceWhalesNorthwestern2022]. This report replicates the Biological Opinion's ship strike analysis using the newer Rice's whale distributional model. Given the wider distribution of Rice's whale, an alternative new Whale Area is suggested to reduce ship strike risk with the Rice's whale based simply on location (25.5º N and higher) and depth (100 to 400 m).
+Since release of the Biological Opinion on oil and gas activities in the Gulf of Mexico [@nmfsBiologicalOpinionFederally2020] that used a published density surface model [@robertsHabitatbasedCetaceanDensity2016] to describe the distribution of the critically endangered Rice's whale (*Balaenoptera ricei*), a new density surface model [@litzCetaceanSeaTurtle2022] has been made available. Importantly, this model extends the distribution of Rice's whale beyond its initial core habitat in the Eastern Gulf of Mexico to the West, where it had previously only been acoustically detected [@soldevillaRiceWhalesNorthwestern2022]. This report replicates the Biological Opinion's ship-strike analysis using the newer Rice's whale distributional model. Given the wider distribution of Rice's whale, an alternative new Whale Area is suggested to reduce ship-strike risk with the Rice's whale based simply on location (25.5º N and higher) and depth (100 to 400 m).
+
+## Background
+
+Rice's whale (*Balaenoptera ricei*, aka Gulf of Mexico whale) is a newly recognized species of baleen whale found only in the Gulf of Mexico (previously known as the Gulf of Mexico Bryde's whale). It is considered Endangered under the U.S. Endangered Species Act and is classified as Critically Endangered on the IUCN Red List. The population size of the entire species was estimated to be only 33 individuals [@waringUSAtlanticGulf2016] or 44 individuals [@roselStatusReviewBryde2016a] using two different methods and is almost certainly under 100 individuals [@roselStatusReviewBryde2016a]. The species appears to be most abundant in the De Soto Canyon area of the northeastern Gulf of Mexico, but is also found persistently along the continental shelf break in the northwestern Gulf, off Louisiana and Texas [@soldevillaRiceWhalesNorthwestern2022], which contains prey features important to the species [@kiszkaCriticallyEndangeredRice2023]. Major threats include risks from oil and gas exploration, oil spills, and ship strikes. The species appears to be especially vulnerable to ship strikes because of its coincidence with several active shipping routes and because these whales rest near the surface at night. The National Marine Fisheries Service conducted a spatial analysis of ship-strike risks for Rice's whale [@nmfsBiologicalOpinionFederally2020] based on a spatial model of the density of Rice's whales [@robertsHabitatbasedCetaceanDensity2016] and on the spatial distribution of vessel traffic in the Gulf of Mexico. Spatial vessel traffic data (measured from vessel Automatic Identification System -- AIS transmission) was extracted from publicly available sources by Jeffrey Adams (NMFS) and was gridded (expressed as kilometers of vessel transects per grid cell) to match the grid used in the spatial model of whale densities by Eric Patterson (NMFS). AIS vessel traffic data are typically only available for larger commercial vessels. Because whales are believed to be at particular risk of serious injury and death by faster vessels, the ship strike risk analysis was stratified by vessel speed. Because the analysis was particularly concerned with the impacts of vessels associated with the oil and gas industry, vessel traffic was also stratified by vessel type. The results were tabulated for 1) all vessels at all speeds, 2) all vessels travelling greater than 10 kts, 3) oil and gas vessels at all speeds, and 4) oil and gas vessels travelling greater than 10 kts. Ship-strike risk is assumed to be proportional to vessel traffic and whale abundance, so relative risk was estimated as the product of these two factors on a spatial grid, normalized relative to the maximum value [@nmfsBiologicalOpinionFederally2020]. In May 2021, several organizations (Natural Resources Defense Council, Healthy Gulf, Center for Biological Diversity, Defenders of Wildlife, Earthjustice, and New England Aquarium) petitioned the National Marine Fisheries Service to institute a mandatory vessel speed limit (10 kts) and other measures to protect Rice's whale in its core habitat. That core habitat was defined as the waters between 100 m and 400 m deep from approximately Pensacola, FL, to just south of Tampa, FL (i.e., from 87.5° W to 27.5° N) plus an additional 10 km around that area. This area generally corresponds to the earlier BIA designation and the Bryde's whale mitigation area defined in NMFS 2020.
+
+Since that time, new analyses of ship and aircraft survey data from 2012 to 2019 [@litzCetaceanSeaTurtle2022] predict a higher density of Rice's whale to the west of the core habitat than was predicted by the previous density model [@robertsHabitatbasedCetaceanDensity2016]. Recent acoustic data also confirmed the presence of Rice's whale west of their core habitat [@soldevillaRiceWhalesNorthwestern2022]. Because the density of vessel traffic is much higher west of the core habitat, the actual ship-strike risk for Rice's whale may be highest outside their previously identified core habitat (referred to hereafter as the "original Whale Area"). This report calculates the spatial risk of ship strikes to Rice's whale based on this more recent model of their density distribution using the same methods and data employed in NMFS's Biological Opinion [@nmfsBiologicalOpinionFederally2020].
 
 ## Whale Densities
 
-The new density surface model [@litzCetaceanSeaTurtle2022] uses approximately 40 km^2^ hexagons as its spatial unit to describe number of individuals per 40 km^2^ in a Lambert Conformal Conic projection, whereas the original model [@robertsHabitatbasedCetaceanDensity2016] used 100 km^2^ cells in a custom equal area Albers projection to describe number of individuals per 100 km^2^. The spatial unit for this new analysis is also 100 km^2^ cells but in the web Mercator projection (EPSG:3857) in order to readily map results online with common "slippy" basemaps, like the Esri Ocean Basemap. All layers were clipped to the study area of the U.S. Exclusive Economic Zone (EEZ) within the Gulf of Mexico.
+The new density surface model [@litzCetaceanSeaTurtle2022] uses approximately 40 km^2^ hexagons as its spatial unit to describe number of individuals per 40 km^2^ in a Lambert Conformal Conic projection, whereas the original whale density model [@robertsHabitatbasedCetaceanDensity2016] used 100 km^2^ cells in a custom equal area Albers projection to describe number of individuals per 100 km^2^. The new ship-strike risk analysis also uses 100 km^2^ cells to be most similar to the AIS data set used in the Biological Opinion. These cells appear in the web Mercator projection (EPSG:3857), which allows for easy online mapping of results using the Esri Ocean Basemap, a common \"slippy\" basemap<!-- [JM1] -->. All layers were clipped to the study area of the U.S. Exclusive Economic Zone (EEZ) within the Gulf of Mexico.
 
-Normally converting polygons to raster extracts only the centroid point of the raster cell from the underlying polygon. In order to capture the entirety of the underlying geometric densities, a vector-based intersection was first performed on all layers (whale hexagons, ship cells, and new units) before summarizing to the raster cell as area-weighted means.
+Normally converting polygons to raster extracts only the centroid point of the raster cell from the underlying polygon. To capture the entirety of the underlying geometric densities, a vector-based intersection was first performed on all layers (whale hexagons, ship cells, and new units) before summarizing to the raster cell as area-weighted means.
 
-In order to adjust for slight differences from projecting coordinate reference systems and rounding errors, the new 100 km^2^ whale density grid was adjusted so the sum of individuals predicted throughout the study area is equal to `r n_whales_Garrison2020`, the most recent abundance estimate [@garrisonAbundanceMarineMammals2020] from the same 2017 and 2018 surveys as the new density model [@litzCetaceanSeaTurtle2022] was derived. 
+To adjust for slight differences from projecting coordinate reference systems and rounding errors, the new 100 km^2^ whale density grid was adjusted so the sum of individuals predicted throughout the study area is equal to `r n_whales_Garrison2020`, the most recent abundance estimate [@garrisonAbundanceMarineMammals2020] from the same 2017 and 2018 surveys as the new density model [@litzCetaceanSeaTurtle2022] was derived.
 
+To adjust for slight differences from projecting coordinate reference systems and for rounding errors, the new 100 km^2^ whale density surface grid that re-projects the most recent density surface model [@litzCetaceanSeaTurtle2022] was adjusted so that the sum of individuals predicted throughout the study area is equal to `r n_whales_Garrison2020`, the most recent abundance estimate [@garrisonAbundanceMarineMammals2020]. That abundance estimate includes the most recent marine mammal survey data used by the new density model [@litzCetaceanSeaTurtle2022].
 
-<!-- - discuss changing distribution -->
-
-Compared to the original distribution (@fig-map-whales-old), the whales are now concentrated along the strip from 100 to 400 m extending into the Western Gulf of Mexico (@fig-map-whales-new).
+Compared to their distribution under the outdated density surface model (@fig-map-whales-old), the whales now appear concentrated along the strip from 100 to 400 m extending into the Western Gulf of Mexico (@fig-map-whales-new).
 
 ```{r}
 #| label: fig-map-whales-old
@@ -93,11 +97,13 @@ map_rast(
   add_ply_wab = T)
 ```
 
-The original Whale Area is described [p. 292 of @nmfsBiologicalOpinionFederally2020] as:
+The original Whale Area --- the habitat area that, pursuant to the Biological Opinion, was subject to vessel speed limits and other measures --- was defined in the Biological Opinion [p. 292 of @nmfsBiologicalOpinionFederally2020] as follows:
 
-> This opinion defines the Bryde’s whale area to include the area from 100- to 400- meter isobaths from 87.5° W to 27.5° N as described in the status review (Rosel 2016) plus an additional 10 km around that area.
+> ...the area from 100- to 400- meter isobaths from 87.5° W to 27.5° N as described in the status review [@roselStatusReviewBryde2016] plus an additional 10 km around that area.
 
 There was only a tiny marginal improvement in capturing additional whale densities by adding the 10 km buffer used to create the original Whale Area (pink outline in @fig-map-whales-old). In generating the new Whale Area, the ease of navigation with simpler description in terms only of a southern limit and depth range outweighed this marginal improvement (red outline in @fig-map-whales-new). This new Whale Area captures 94% of the population from the new density estimates [@litzCetaceanSeaTurtle2022] compared to only 52% of the original Whale Area (@tbl-whales-by-area).
+
+Adding the same 10 km buffer from the Biological Opinion (pink outline in @fig-map-whales-old) to the 100-400m strip outlined in red in @fig-map-whales-new, results in only a tiny marginal improvement in capturing whale densities (97% vs. 94%). For purposes of defining a new Whale Area in which vessel measures might apply, the benefit of ease of navigation, based on a simpler area description with only a southern limit and depth range defined, may outweigh this marginal improvement. This new Whale Area captures 94% of the densities derived from the new surface model [@litzCetaceanSeaTurtle2022], as compared to the much smaller proportion (52%) that would be captured within the original Whale Area (@tbl-whales-by-area).
 
 ```{r}
 #| label: fig-map-whales-new
@@ -110,7 +116,6 @@ map_rast(
   add_depth_contours=T,
   add_ply_wan = T)
 ```
-
 
 ```{r}
 #| label: tbl-whales-by-area
@@ -132,10 +137,9 @@ d |>
   opt_stylize(style = 6)
 ```
 
-
 ## Vessel Traffic
 
-In order to evaluate the threat of ship strike to Rice's whales, we used the same AIS data from 2014 to 2018 as the Biological Opinion [@nmfsBiologicalOpinionFederally2020]. This data is based on a grid of cells ~126 km^2^ in Albers equal area projection. Traffic in terms of kilometers (km) traversed within a cell was differentiated based on speed (≤  10 knots or > 10 knots) and type (oil & gas or all types). In order to produce maps similar to the original Biological Opinion [@nmfsBiologicalOpinionFederally2020] showing spatial variation, colors were assigned to the Jenks natural breaks of the distribution of values (Figures [-@fig-ships-avg-all-gt01], [-@fig-ships-avg-boem-gt01], [-@fig-ships-avg-all-gt10], [-@fig-ships-avg-boem-gt10]).
+In order to evaluate the threat of ship-strike to Rice's whales, we used the same AIS data from 2014 to 2018 as the Biological Opinion [@nmfsBiologicalOpinionFederally2020]. This data is based on a grid of cells \~126 km^2^ in Albers equal area projection. Traffic in terms of kilometers (km) traversed within a cell was differentiated based on speed (≤ 10 knots or \> 10 knots) and type (oil & gas or all types). In order to produce maps similar to the original Biological Opinion [@nmfsBiologicalOpinionFederally2020] showing spatial variation, colors were assigned to the Jenks natural breaks of the distribution of values (Figures [-@fig-ships-avg-all-gt01], [-@fig-ships-avg-boem-gt01], [-@fig-ships-avg-all-gt10], [-@fig-ships-avg-boem-gt10]).
 
 ```{r}
 #| label: fig-ships-avg-all-gt01
@@ -167,7 +171,7 @@ map_rast_jenks(stk_rast["ships_avg_boem_gt01"], "Traffic,<br><small>oil & gas,<b
 
 ## Vessel Risk to Whales
 
-The vessel risk ($R$) to whales is calculated as a simple multiplication of number of whales ($W$) and km of vessel traffic ($V$) (@eq-risk).
+Following the methodology employed in the Biological Opinion, the vessel risk ($R$) to whales is calculated here as a simple multiplication of number of whales ($W$) and km of vessel traffic ($V$) (@eq-risk) for each spatial cell.
 
 $$
 R = W * V
@@ -182,7 +186,6 @@ This risk ($R$) can be further differentiated by vessel ($V$) type and speed (Fi
 stk_rast["risk_avg_all_gt01"] |> 
   map_rast("Risk,<br><small>all types,<br>all speeds<br>(# * km)</small>", "RdYlGn")
 ```
-
 
 ```{r}
 #| label: fig-risk-avg-boem-gt10
@@ -249,7 +252,7 @@ d |>
       risk_all, risk_boem, pct_boem))
 ```
 
-Finally, we can evaluate the risk reduction of the original Whale Area proposed in the Biological Opinion [@nmfsBiologicalOpinionFederally2020] compared with the newly proposed Whale Area encompassing the wider Gulf of Mexico [@tbl-risk-reduction-by-areas].
+Finally, we can evaluate the risk reduction of the original Whale Area proposed in the Biological Opinion [@nmfsBiologicalOpinionFederally2020] compared with the newly proposed Whale Area, when the new density surface model is used (@tbl-risk-reduction-by-areas). As can be seen, the newly proposed Whale Area is associated with substantially greater risk reduction than the original Whale Area, regardless of vessel type (oil & gas or all types) and speed (\> 10 knots or all speeds).
 
 ```{r}
 #| label: tbl-risk-reduction-by-areas
@@ -316,7 +319,7 @@ d |>
     risk_wan           = "New",
     pctriskreduced_wan = "%") |> 
   tab_spanner(
-    label = "Risk Reduction by Area",
+    label = "Risk Reduction by Whale Area",
     columns = c(
       risk_wab, pctriskreduced_wab, 
       risk_wan, pctriskreduced_wan)) |> 
@@ -329,9 +332,8 @@ d |>
 
 This report was produced using the principles of reproducible research [@lowndesOurPathBetter2017] with the R programming language [@rcoreteamLanguageEnvironmentStatistical2023]. Statistical analysis were performed using the libraries and methods of the [`tidyverse`](https://www.tidyverse.org/) [@wickhamWelcomeTidyverse2019] and spatial features [`sf`](https://r-spatial.github.io/sf/index.html) [@pebesmaJournalSimpleFeatures2018] output to a [Quarto](https://quarto.org/) document [@allaireQuartoInterfaceQuarto2022]. All source code is available in the Github repository [github.com/ecoquants/ricei](https://github.com/ecoquants/ricei). The interactive version of this report is available at [ecoquants.com/ricei](https://ecoquants.com/ricei).
 
+## Acknowledgements
+
+This report received funding from Earthjustice. The AIS data used in [@nmfsBiologicalOpinionFederally2020] were provided by NMFS pursuant to a Freedom of Information Act request. A portion of the background section was contributed by Jay Barlow. Steve Mashuda (Earthjustice) and Michael Jasny (NRDC) reviewed drafts of the report.
+
 ## References {.unnumbered}
-
-
-
-
-

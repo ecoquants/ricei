@@ -26,6 +26,7 @@ depth_contours_geo <- here("data/depth_contours.geojson")
 whales01_geo <- here("data/whales_gteq0.01per100km2.geojson")
 wab_geo      <- here("data/whale_area_bioop.geojson")
 wan_geo      <- here("data/whale_area_new.geojson")
+wau_geo      <- here("data/whale_area_new_buffered.geojson")
 bia_geo      <- here("data/whale_area_bia.geojson")
 
 whales_n_by_area_csv <- here("data/tbl_whales_n_by_area.csv")
