@@ -11,15 +11,15 @@ format:
     number-depth: 3
     code-fold: true
     code-tools: true
-  docx:
-    toc: true
-    toc-depth: 3
-    toc-title: "Contents"
-    number-sections: true
-    code-annotations: false
-    execute:
-      echo: false
-      warning: false
+  # docx:
+  #   toc: true
+  #   toc-depth: 3
+  #   toc-title: "Contents"
+  #   number-sections: true
+  #   code-annotations: false
+  #   execute:
+  #     echo: false
+  #     warning: false
 editor_options: 
   chunk_output_type: console
 ---
