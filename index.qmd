@@ -11,15 +11,15 @@ format:
     number-depth: 3
     code-fold: true
     code-tools: true
-  # docx:
-  #   toc: true
-  #   toc-depth: 3
-  #   toc-title: "Contents"
-  #   number-sections: true
-  #   code-annotations: false
-  #   execute:
-  #     echo: false
-  #     warning: false
+  docx:
+    toc: true
+    toc-depth: 3
+    toc-title: "Contents"
+    number-sections: true
+    code-annotations: false
+    execute:
+      echo: false
+      warning: false
 editor_options: 
   chunk_output_type: console
 ---
@@ -63,6 +63,14 @@ cat("
 - [ ] Delete this heading and section, update ToC.")
 ```
 
+::: {.callout-caution collapse="true"}
+
+## @fig-map-whales-old corrected on 2023-11-25
+
+Please note that @fig-map-whales-old has been updated on 2023-11-25. The layer of whale densities [@robertsHabitatbasedCetaceanDensity2016] was previously not correctly projected and therefore misaligned with the original Whale Area [p. 292 of @nmfsBiologicalOpinionFederally2020]. The raster layer has since been explicitly projected to the same as the basemap (Web Mercator; [EPSG:3857](https://epsg.io/3857)) and now shows alignment with the original Whale Area.
+
+:::
+
 ## Abstract
 
 Since release of the Biological Opinion on oil and gas activities in the Gulf of Mexico [@nmfsBiologicalOpinionFederally2020] that used a published density surface model [@robertsHabitatbasedCetaceanDensity2016] to describe the distribution of the critically endangered Rice's whale (*Balaenoptera ricei*), a new density surface model [@litzCetaceanSeaTurtle2022] has been made available. Importantly, this model extends the distribution of Rice's whale beyond its initial core habitat in the Eastern Gulf of Mexico to the West, where it had previously only been acoustically detected [@soldevillaRiceWhalesNorthwestern2022]. This report replicates the Biological Opinion's ship-strike analysis using the newer Rice's whale distributional model. Given the wider distribution of Rice's whale, an alternative new Whale Area is suggested to reduce ship-strike risk with the Rice's whale based simply on location (25.5º N and higher) and depth (100 to 400 m).
@@ -88,7 +96,8 @@ Compared to their distribution under the outdated density surface model (@fig-ma
 #| fig-cap: "Map of previous whale densities [@robertsHabitatbasedCetaceanDensity2016]  as 100 km^2^ cells used by [@nmfsBiologicalOpinionFederally2020] showing the dominance in the northeastern corner of the Gulf of Mexico. The original Whale Area [p. 292 of @nmfsBiologicalOpinionFederally2020] is depicted by the pink outline polygon for vessel slowdown and nighttime avoidance. Depth contours are shown in dash blacked lines for 100 m (finer) and 400 m (thicker)."
 
 map_rast(
-  r = rast(whales_roberts2016_img), 
+  r = rast(whales_roberts2016_img) |> 
+    project("epsg:3857"),  # wierdly misprojects otherwise w/ being shoved down
   legend_title = "Whales<br><small>(Roberts, 2016)<br>(# / 100 km<sup>2</sup>)</small>",
   group = "whales_per_100km2_Roberts2016",
   add_depth_contours =T,
