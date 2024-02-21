@@ -71,6 +71,22 @@ Please note that @fig-map-whales-old has been updated on 2023-11-25. The layer o
 
 :::
 
+::: {.callout-caution collapse="true"}
+
+## Consolidation of duplicative paragraphs in Whale Densities corrected on 2024-02-21
+
+These two paragraphs were consolidated from:
+
+> There was only a tiny marginal improvement in capturing additional whale densities by adding the 10 km buffer used to create the original Whale Area (pink outline in @fig-map-whales-old). In generating the new Whale Area, the ease of navigation with simpler description in terms only of a southern limit and depth range outweighed this marginal improvement (red outline in @fig-map-whales-new). This new Whale Area captures 94% of the population from the new density estimates [@litzCetaceanSeaTurtle2022] compared to only 52% of the original Whale Area (@tbl-whales-by-area).
+> 
+> Adding the same 10 km buffer from the Biological Opinion (pink outline in @fig-map-whales-old) to the 100-400m strip outlined in red in @fig-map-whales-new, results in only a tiny marginal improvement in capturing whale densities (97% vs. 94%). For purposes of defining a new Whale Area in which vessel measures might apply, the benefit of ease of navigation, based on a simpler area description with only a southern limit and depth range defined, may outweigh this marginal improvement. This new Whale Area captures 94% of the densities derived from the new surface model [@litzCetaceanSeaTurtle2022], as compared to the much smaller proportion (52%) that would be captured within the original Whale Area (@tbl-whales-by-area).
+
+to:
+
+> This new Whale Area captures 94% of the densities derived from the new surface model [@litzCetaceanSeaTurtle2022], as compared to the much smaller proportion (52%) that would be captured within the original Whale Area (@tbl-whales-by-area). Adding the same 10 km buffer from the original Biological Opinion (pink outline in @fig-map-whales-old) to the 100-400m strip based on the newer density model [@litzCetaceanSeaTurtle2022] (red outline in @fig-map-whales-new), results in only a tiny marginal improvement in capturing whale densities (97% with 10 km buffer vs. 94% without). For purposes of defining a new Whale Area in which vessel mitigation measures could apply, the benefit of ease of navigation, based on a simpler area description with only a southern limit and depth range defined, may outweigh this marginal improvement.
+
+:::
+
 ## Abstract
 
 Since release of the Biological Opinion on oil and gas activities in the Gulf of Mexico [@nmfsBiologicalOpinionFederally2020] that used a published density surface model [@robertsHabitatbasedCetaceanDensity2016] to describe the distribution of the critically endangered Rice's whale (*Balaenoptera ricei*), a new density surface model [@litzCetaceanSeaTurtle2022] has been made available. Importantly, this model extends the distribution of Rice's whale beyond its initial core habitat in the Eastern Gulf of Mexico to the West, where it had previously only been acoustically detected [@soldevillaRiceWhalesNorthwestern2022]. This report replicates the Biological Opinion's ship-strike analysis using the newer Rice's whale distributional model. Given the wider distribution of Rice's whale, an alternative new Whale Area is suggested to reduce ship-strike risk with the Rice's whale based simply on location (25.5º N and higher) and depth (100 to 400 m).
@@ -108,9 +124,7 @@ The original Whale Area --- the habitat area that, pursuant to the Biological Op
 
 > ...the area from 100- to 400- meter isobaths from 87.5° W to 27.5° N as described in the status review [@roselStatusReviewBryde2016] plus an additional 10 km around that area.
 
-There was only a tiny marginal improvement in capturing additional whale densities by adding the 10 km buffer used to create the original Whale Area (pink outline in @fig-map-whales-old). In generating the new Whale Area, the ease of navigation with simpler description in terms only of a southern limit and depth range outweighed this marginal improvement (red outline in @fig-map-whales-new). This new Whale Area captures 94% of the population from the new density estimates [@litzCetaceanSeaTurtle2022] compared to only 52% of the original Whale Area (@tbl-whales-by-area).
-
-Adding the same 10 km buffer from the Biological Opinion (pink outline in @fig-map-whales-old) to the 100-400m strip outlined in red in @fig-map-whales-new, results in only a tiny marginal improvement in capturing whale densities (97% vs. 94%). For purposes of defining a new Whale Area in which vessel measures might apply, the benefit of ease of navigation, based on a simpler area description with only a southern limit and depth range defined, may outweigh this marginal improvement. This new Whale Area captures 94% of the densities derived from the new surface model [@litzCetaceanSeaTurtle2022], as compared to the much smaller proportion (52%) that would be captured within the original Whale Area (@tbl-whales-by-area).
+This new Whale Area captures 94% of the densities derived from the new surface model [@litzCetaceanSeaTurtle2022], as compared to the much smaller proportion (52%) that would be captured within the original Whale Area (@tbl-whales-by-area). Adding the same 10 km buffer from the original Biological Opinion (pink outline in @fig-map-whales-old) to the 100-400m strip based on the newer density model [@litzCetaceanSeaTurtle2022] (red outline in @fig-map-whales-new), results in only a tiny marginal improvement in capturing whale densities (97% with 10 km buffer vs. 94% without). For purposes of defining a new Whale Area in which vessel mitigation measures could apply, the benefit of ease of navigation, based on a simpler area description with only a southern limit and depth range defined, may outweigh this marginal improvement.
 
 ```{r}
 #| label: fig-map-whales-new
