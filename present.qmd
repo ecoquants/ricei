@@ -44,7 +44,7 @@ tbl_units <- ply_units |>
 
 ## Whale Distributions {.smaller}
 
-The Rice's whale (*Balaenoptera ricei*) is endangered with an estimated population size of 51 individuals ([Garrison et al. 2020](https://www.fisheries.noaa.gov/resource/document/abundance-marine-mammals-waters-us-gulf-mexico-during-summers-2017-and-2018)). The Biological Opinion ([NOAA 2020](https://www.fisheries.noaa.gov/resource/document/biological-opinion-federally-regulated-oil-and-gas-program-activities-gulf-mexico)) based on original distribution model ([Roberts et al. 2016](https://doi.org/10.1038/srep22615)) has been superseded by a newer distribution model ([Litz et al. 2022](https://www.ncei.noaa.gov/access/metadata/landing-page/bin/iso?id=gov.noaa.nodc:0243469)) showing range expansion into western Gulf of Mexico.
+The Rice's whale (*Balaenoptera ricei*) is endangered with an estimated population size of 51 individuals ([Garrison et al. 2020](https://www.fisheries.noaa.gov/resource/document/abundance-marine-mammals-waters-us-gulf-mexico-during-summers-2017-and-2018)). The Biological Opinion ([NOAA 2020](https://www.fisheries.noaa.gov/resource/document/biological-opinion-federally-regulated-oil-and-gas-program-activities-gulf-mexico)) that proposes vessel mitigation measures is based on a distribution model ([Roberts et al. 2016](https://doi.org/10.1038/srep22615)) that has been superseded by a newer model ([Litz et al. 2022](https://www.ncei.noaa.gov/access/metadata/landing-page/bin/iso?id=gov.noaa.nodc:0243469)) showing range expansion into the western Gulf of Mexico.
 
 ```{r}
 r_1     <- rast(whales_roberts2016_img) |> project("epsg:3857")
