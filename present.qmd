@@ -1,0 +1,373 @@
+---
+title: "Spatial analysis of ship-strike risk for Rice’s whale in the Gulf of Mexico"
+author: "Benjamin D Best, PhD (ben@ecoquants.com)"
+date: "2024-02-23"
+format: revealjs
+editor_options: 
+  chunk_output_type: console
+revealjs-plugins:
+  - revealjs-text-resizer
+---
+
+```{r setup_chunks, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = F,
+  warning = F,
+  message = F)
+
+# packages ----
+source(here::here("scripts/functions.R"))
+source(here("scripts/paths.R"))
+librarian::shelf(
+  leaflet.extras2)
+
+# [+ options arg in addRasterImage() for specifying pane]( https://github.com/rstudio/leaflet/pull/692#issue-650790764)
+# remotes::install_github("rstudio/leaflet")
+
+# data ----
+ply_study  <- read_sf(study_geo)
+ply_cells  <- read_sf(cells_geo)
+ply_units  <- read_sf(units_gpkg)
+ply_ships  <- read_sf(ships_geo)
+ply_whales <- read_sf(whales_geo)
+ply_bia    <- read_sf(bia_geo)
+ply_wab    <- read_sf(wab_geo)
+ply_wan    <- read_sf(wan_geo)
+tbl_ships  <- read_csv(ships_csv)
+tbl_whales <- read_csv(whales_csv)
+lns_depth_contours <- read_sf(depth_contours_geo)
+stk_rast   <- rast(rast_tif)
+r_cells    <- stk_rast["cell_id"]
+tbl_units <- ply_units |> 
+  st_drop_geometry()
+```
+
+## Rice's whale (*Balaenoptera ricei*) distribution {.smaller}
+
+The Biological Opinion ([NOAA 2020](https://www.fisheries.noaa.gov/resource/document/biological-opinion-federally-regulated-oil-and-gas-program-activities-gulf-mexico)) based on original distribution ([Roberts et al. 2016](https://doi.org/10.1038/srep22615)) has been superseded by newer distribution ([Litz et al. 2022](https://www.ncei.noaa.gov/access/metadata/landing-page/bin/iso?id=gov.noaa.nodc:0243469)) showing range expansion into western Gulf of Mexico.
+
+```{r}
+r_1     <- rast(whales_roberts2016_img) |> project("epsg:3857")
+group_1 <- "Whales / 100km2 (Roberts et al. 2016)"
+r_2     <- stk_rast["whales_avg_n_per_100km2"] |> project("epsg:3857")
+group_2 <- "Whales / 100km2 (Litz et al. 2016)"
+
+r_vals <- unique(na.omit(c(values(r_1), values(r_2))))
+pal         <- colorNumeric(
+  palette = "Spectral", 
+  domain  = r_vals, 
+  reverse = T, na.color = "transparent")
+legend_title <- "Whale density<br>(# / 100 km<sup>2</sup>)</small>"
+
+n_arrow_img <- "https://cdn.pixabay.com/photo/2013/07/12/17/54/arrow-152596_960_720.png"
+
+lyrs <- c(group_1, group_2)
+  
+m <- leaflet(
+  options = leafletOptions(
+    zoomControl        = T,
+    attributionControl = F)) |>
+  addMapPane("left",  zIndex = 0) |>
+  addMapPane("right", zIndex = 0) |>
+  addProviderTiles(
+    "Esri.OceanBasemap",
+    options = c(
+      providerTileOptions(
+        variant = "Ocean/World_Ocean_Base"),
+      pathOptions(
+        pane = "left")),
+    layerId = "old") |>
+  addProviderTiles(
+    "Esri.OceanBasemap",
+    options = c(
+      providerTileOptions(
+        variant = "Ocean/World_Ocean_Base"),
+      pathOptions(
+        pane = "right")),
+    layerId = "new") |>
+  addProviderTiles(
+    "Esri.OceanBasemap",
+    options = providerTileOptions(
+      variant = "Ocean/World_Ocean_Reference")) |> 
+  addControl(
+    html     = "right: Litz et al. 2022",
+    position = "topright")|> 
+  addControl(
+    html     = "left: Roberts et al. 2016",
+    position = "topleft") |> 
+  addRasterImage(
+    r_1, project = F, opacity = 0.8,
+    colors  = pal,
+    group   = group_1,
+    options = pathOptions(pane = "left")) |> 
+  addRasterImage(
+    r_2, project = F, opacity = 0.8,
+    colors  = pal,
+    group   = group_2,
+    options = pathOptions(pane = "right")) |> 
+  addSidebyside(
+    layerId = "sidecontrols",
+    leftId  = "old",
+    rightId = "new") |> 
+  addScaleBar(
+    position = c("bottomleft")) |> 
+  leafem::addLogo(n_arrow_img) |> 
+  addLegend(
+    pal      = pal, 
+    values   = r_vals, 
+    opacity  = 0.7, 
+    title    = legend_title,
+    position = "topright") |> 
+  leaflet.extras::addFullscreenControl()
+
+# add_depth_contours ----
+grps  <- c("100 m contour", "400 m contour")
+cols  <- c("black", "black")
+wts   <- c(1, 2)
+dashs <- c("5", "10")
+    
+m <- m |> 
+  addPolylines(
+    data = lns_depth_contours |>
+      filter(depth_m == "100"),
+    group  = grps[1],
+    color  = cols[1], opacity = 1.0,
+    weight = wts[1], dashArray = dashs[1],
+    options = pathOptions(pane = "left")) |> 
+  addPolylines(
+    data = lns_depth_contours |> 
+      filter(depth_m == "400"),
+    group  = grps[2],
+    color  = cols[2], opacity = 1.0,
+    weight = wts[2], dashArray = dashs[2],
+    options = pathOptions(pane = "left"))
+
+lyrs <- c(lyrs, grps)
+
+# add_ply_bia ----
+grp <- "Bio. Imp. Area (LaBrecque 2016)"
+
+m <- m |> 
+  addPolygons(
+    data = ply_bia, 
+    color="pink", fill = F, 
+    opacity = 1.0, weight=2,
+    group = grp,
+    options = pathOptions(pane = "left")) |> 
+  hideGroup(grp)
+
+lyrs <- c(lyrs, grp)
+
+# add_ply_wab ----
+grp <- "Whale Area (NOAA 2020)"
+
+m <- m |> 
+  addPolygons(
+    data = ply_wab, 
+    color="purple", fill = F, 
+    opacity = 1.0, weight=2,
+    group = grp,
+    options = pathOptions(pane = "left"))
+
+lyrs <- c(lyrs, grp)
+
+# add_ply_wan ----
+grp <- "Whale Area, New"
+
+m <- m |> 
+  addPolygons(
+    data = ply_wan, 
+    color="red", fill = F, 
+    opacity = 1.0, weight=2,
+    group = grp,
+    options = pathOptions(pane = "right"))
+
+lyrs <- c(lyrs, grp)
+
+# add_layersControl ----
+m |> 
+  addLayersControl(
+    overlayGroups = lyrs,
+    options = layersControlOptions(collapsed = T))
+```
+
+## Whales Captured  {.bigger}
+
+```{r}
+#| label: tbl-whales-by-area
+#| tbl-cap: Table of new whale densities (Litz et al. 2022) summarized by total study area (U.S. Gulf of Mexico), previous Whale Area (NMFS 2020) and newly proposed Whale Area.
+
+a <- read_csv(whales_n_by_area_csv)
+
+d <- tribble(
+  ~Item, ~`#`, ~`%`,
+  "Whales in Study (U.S. Gulf of Mexico)", a$n_whales_gom, 1,
+  "Whales in Original Whale Area (NMFS, 2020)", a$n_whales_wab, a$pct_whales_wab,
+  "Whales in New Whale Area", a$n_whales_wan, a$pct_whales_wan)
+
+d |> 
+  gt() |> 
+  fmt_number(decimals=0) |>  # c(risk_all, risk_boem), 
+  fmt_percent(
+    `%`, decimals = 0) |>
+  opt_stylize(style = 6) |> 
+  tab_options(table.font.size = px(24))
+```
+
+## Vessel Traffic {.smaller}
+
+::: {.panel-tabset}
+
+### All Types, All Speeds
+
+```{r}
+#| label: fig-ships-avg-all-gt01
+#| fig-cap: "Map of annual average traffic (km) for all vessel types at all speeds from AIS data (2014 to 2018). Depth contours are shown in dash blacked lines for 100 m (finer) and 400 m (thicker)."
+
+map_rast_jenks(stk_rast["ships_avg_all_gt01"], "Traffic,<br><small>all types,<br>all speeds,<br>avg year<br>(km)</small>", "RdYlGn")
+```
+
+### Oil & Gas, All Speeds
+
+```{r}
+#| label: fig-ships-avg-boem-gt01
+#| fig-cap: "Map of annual average traffic (km) for oil and gas vessels at all speeds from AIS data (2014 to 2018). Depth contours are shown in dash blacked lines for 100 m (finer) and 400 m (thicker)."
+
+map_rast_jenks(stk_rast["ships_avg_boem_gt01"], "Traffic,<br><small>oil & gas,<br>all speeds,<br>avg year<br>(km)</small>", "RdYlGn")
+```
+
+### All Types, > 10 knots
+
+```{r}
+#| label: fig-ships-avg-all-gt10
+#| fig-cap: "Map of annual average traffic (km) for all vessel types > 10 knots from AIS data (2014 to 2018). Depth contours are shown in dash blacked lines for 100 m (finer) and 400 m (thicker)."
+
+map_rast_jenks(stk_rast["ships_avg_all_gt01"], "Traffic,<br><small>all types,<br>> 10 knots,<br>avg year<br>(km)</small>", "RdYlGn")
+```
+
+### Oil & Gas, > 10 knots
+
+```{r}
+#| label: fig-ships-avg-boem-gt10
+#| fig-cap: "Map of annual average traffic (km) for oil and gas vessels > 10 knots from AIS data (2014 to 2018). Depth contours are shown in dash blacked lines for 100 m (finer) and 400 m (thicker)."
+
+map_rast_jenks(stk_rast["ships_avg_boem_gt01"], "Traffic,<br><small>oil & gas,<br>> 10 knots,<br>avg year<br>(km)</small>", "RdYlGn")
+```
+
+:::
+
+## Vessel Risk to Whales {.smaller}
+
+$$
+Risk = {Whale\:density}\:(\#/100km^2) * {Vessel\:traffic\:(km/100km^2)}
+$$
+
+::: {.panel-tabset}
+
+### All Types, All Speeds
+
+```{r}
+#| label: fig-risk-avg-all-gt01
+#| fig-cap: "Map of risk (# whales * km vessel traffic) for all vessels at all speeds. Depth contours are shown in dash blacked lines for 100 m (finer) and 400 m (thicker)."
+
+stk_rast["risk_avg_all_gt01"] |> 
+  map_rast("Risk,<br><small>all types,<br>all speeds<br>(# * km)</small>", "RdYlGn")
+```
+
+### Oil & Gas, > 10 knots
+
+```{r}
+#| label: fig-risk-avg-boem-gt10
+#| fig-cap: "Map of risk (# whales * km vessel traffic) for oil and gas vessels > 10 knots. Depth contours are shown in dash blacked lines for 100 m (finer) and 400 m (thicker)."
+
+stk_rast["risk_avg_boem_gt10"] |> 
+  map_rast("Risk,<br><small>oil & gas,<br>> 10 knots <br>(# * km)</small>", "RdYlGn")
+```
+
+:::
+
+## Risk Reduction by Areas {.smaller}
+
+```{r}
+#| label: tbl-risk-reduction-by-areas
+#| tbl-cap: "Reduction of vessel strike risk (# whales * km vessel traffic) to Rice's whales with enforcement of original (NMFS 2020) and new Whale Areas, averaged across years of AIS data (2014 to 2018). All percentage (%) reductions are compared to All Vessels for given speeds."
+
+d <- read_csv(risk_reduction_by_areas_csv) |> 
+  select(yr, matches("wan|wab$")) |> 
+  rename_with(
+    ~ str_replace(.x, "^pct_risk_reduced", "pctriskreduced"),
+    starts_with("pct_risk_reduced")) |> 
+  pivot_longer(
+    -yr,
+    names_to  = "var",
+    values_to = "val") |>  # table(d$var)
+  separate_wider_delim(
+    var,
+    delim = "_",
+    names = c("v","type","speed","area")) |> 
+  pivot_wider(
+    names_from = c(v, area),
+    names_sep = "_",
+    values_from = val) |> 
+  relocate(speed, type) |> 
+  arrange(speed, type, yr)
+# names(d) |> sort() |> paste(collapse="\n") |> cat()
+
+d <- d |> 
+  mutate(
+    yr = as.character(yr)) |> 
+  bind_rows(
+    bind_cols(
+      yr = "Avg",
+      d |>
+        select(-yr) |> 
+        group_by(speed, type) |> 
+        summarise(
+          across(where(is.numeric), mean),
+          .groups = "drop") ) ) |>
+  arrange(speed, type, yr)
+
+d <- d |> 
+  mutate(
+    speed = case_match(
+      speed, 
+      "gt01" ~ "All speeds",
+      "gt10" ~ "> 10 knots"),
+    type = case_match(
+      type, 
+      "all"  ~ "All vessels",
+      "boem" ~ "Oil & Gas vessels") )
+
+d |> 
+  filter(yr == "Avg") |> 
+  mutate(
+    speed_type = glue("{speed} - {type}")) |> 
+  select(speed_type, risk_wab, pctriskreduced_wab, risk_wan, pctriskreduced_wan) |> 
+  gt() |> 
+  fmt_number(decimals=0) |>  # c(risk_all, risk_boem), 
+  fmt_percent(c(
+    pctriskreduced_wab,
+    pctriskreduced_wan), decimals = 0) |>
+  opt_stylize(style = 6) |>
+  cols_label(
+    speed_type        = "Speed - Vessel Type",
+    risk_wab           = "Original",
+    pctriskreduced_wab = "%",
+    risk_wan           = "New",
+    pctriskreduced_wan = "%") |> 
+  tab_spanner(
+    label = "Risk Reduction by Whale Area",
+    columns = c(
+      risk_wab, pctriskreduced_wab, 
+      risk_wan, pctriskreduced_wan)) |> 
+  tab_options(table.font.size = px(24))
+```
+
+## Thank You
+
+This report received funding from Earthjustice and NRDC. The AIS data used in (NMFS 2020) were provided by NMFS pursuant to a Freedom of Information Act request. A portion of the background section was contributed by Jay Barlow. Steve Mashuda (Earthjustice) and Michael Jasny (NRDC) reviewed drafts of the report.
+
+### Further Information
+
+- Report: [ecoquants.com/ricei](https://ecoquants.com/ricei/)
+- Source code: [github.com/ecoquants/ricei](https://github.com/ecoquants/ricei)

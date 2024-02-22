@@ -1,5 +1,5 @@
 librarian::shelf(
-  bslib, dplyr, glue, leaflet, readr, sf, shiny)
+  bslib, dplyr, glue, here, leaflet, readr, sf, shiny)
 
 whales_geo     <- here("data/whales.geojson")
 whales_csv     <- here("data/whales.csv")
