@@ -42,9 +42,13 @@ tbl_units <- ply_units |>
   st_drop_geometry()
 ```
 
-## Whale Distributions {.smaller}
+## Introduction {.smaller}
 
-The Rice's whale (*Balaenoptera ricei*) is endangered with an estimated population size of 51 individuals ([Garrison et al. 2020](https://www.fisheries.noaa.gov/resource/document/abundance-marine-mammals-waters-us-gulf-mexico-during-summers-2017-and-2018)). The Biological Opinion ([NOAA 2020](https://www.fisheries.noaa.gov/resource/document/biological-opinion-federally-regulated-oil-and-gas-program-activities-gulf-mexico)) that proposes vessel mitigation measures is based on a distribution model ([Roberts et al. 2016](https://doi.org/10.1038/srep22615)) that has been superseded by a newer model ([Litz et al. 2022](https://www.ncei.noaa.gov/access/metadata/landing-page/bin/iso?id=gov.noaa.nodc:0243469)) showing range expansion into the western Gulf of Mexico.
+**Motivation**. The Rice's whale (*Balaenoptera ricei*) is endangered with an estimated population size of 51 individuals ([Garrison et al. 2020](https://www.fisheries.noaa.gov/resource/document/abundance-marine-mammals-waters-us-gulf-mexico-during-summers-2017-and-2018)). The Biological Opinion ([NOAA 2020](https://www.fisheries.noaa.gov/resource/document/biological-opinion-federally-regulated-oil-and-gas-program-activities-gulf-mexico)) that proposes vessel mitigation measures is based on a distribution model ([Roberts et al. 2016](https://doi.org/10.1038/srep22615)) that has been superseded by a newer model ([Litz et al. 2022](https://www.ncei.noaa.gov/access/metadata/landing-page/bin/iso?id=gov.noaa.nodc:0243469)) showing range expansion into the western Gulf of Mexico.
+
+**Methods**. We adhered to similar methods as in the Biological Opinion ([NOAA 2020](https://www.fisheries.noaa.gov/resource/document/biological-opinion-federally-regulated-oil-and-gas-program-activities-gulf-mexico)) for creating a new Whale Area also based on the 100- to 400- meter isobaths to now extend to the western Gulf of Mexico, except without a 10 km buffer (since only marginal improvement from 94% to 97% containment of distribution). Risk to ship strike was based on the same AIS vessel traffic data (2014-2018).
+
+## Whale Distributions
 
 ```{r}
 r_1     <- rast(whales_roberts2016_img) |> project("epsg:3857")
@@ -191,7 +195,7 @@ m |>
     options = layersControlOptions(collapsed = T))
 ```
 
-## Whales Captured  {.bigger}
+## Whales Captured
 
 ```{r}
 #| label: tbl-whales-by-area
@@ -228,6 +232,10 @@ map_rast_jenks(stk_rast["ships_avg_all_gt01"], "Traffic,<br><small>all types,<br
 ```
 
 ### Oil & Gas, All Speeds
+
+```{r debug_eval_F, include=FALSE}
+knitr::opts_chunk$set(eval = F)
+```
 
 ```{r}
 #| label: fig-ships-avg-boem-gt01
