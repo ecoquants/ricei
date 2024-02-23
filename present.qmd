@@ -233,10 +233,6 @@ map_rast_jenks(stk_rast["ships_avg_all_gt01"], "Traffic,<br><small>all types,<br
 
 ### Oil & Gas, All Speeds
 
-```{r debug_eval_F, include=FALSE}
-knitr::opts_chunk$set(eval = F)
-```
-
 ```{r}
 #| label: fig-ships-avg-boem-gt01
 #| fig-cap: "Map of annual average traffic (km) for oil and gas vessels at all speeds from AIS data (2014 to 2018). Depth contours are shown in dash blacked lines for 100 m (finer) and 400 m (thicker)."
