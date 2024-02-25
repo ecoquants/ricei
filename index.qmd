@@ -46,7 +46,7 @@ tbl_whales <- read_csv(whales_csv)
 lns_depth_contours <- read_sf(depth_contours_geo)
 stk_rast   <- rast(rast_tif)
 r_cells    <- stk_rast["cell_id"]
-tbl_units <- ply_units |> 
+tbl_units  <- ply_units |> 
   st_drop_geometry()
 ```
 
@@ -87,6 +87,23 @@ to:
 
 :::
 
+::: {.callout-caution collapse="true"}
+
+## Clarified southern boundary of new Whale Area on 2024-02-25
+
+OLD:
+
+> This new Whale Area captures 94% of the densities derived from the new surface model [@litzCetaceanSeaTurtle2022], as compared to the much smaller proportion (52%) that would be captured within the original Whale Area (@tbl-whales-by-area). 
+
+NEW:
+
+> A new Whale Area was similarly formed by these 100- to 400-meter isobaths but now extends across to the western Gulf of Mexico. The southern boundary (25.5º latitude) was defined by extracting the southern limit of the 90% contour around the new whale density surface [@litzCetaceanSeaTurtle2022]. This new Whale Area captures 94% of the densities derived from the new surface model [@litzCetaceanSeaTurtle2022], as compared to the much smaller proportion (52%) that would be captured within the original Whale Area (@tbl-whales-by-area). 
+
+For the R code used to calculate this southern limit from the 90% contour of the whale density layer, see [prep.qmd#L701-L735](https://github.com/ecoquants/ricei/blob/ddc44fff2c5e2f3990c92841d48531919aa565ca/scripts/prep.qmd#L701-L735).
+
+:::
+
+
 ## Abstract
 
 Since release of the Biological Opinion on oil and gas activities in the Gulf of Mexico [@nmfsBiologicalOpinionFederally2020] that used a published density surface model [@robertsHabitatbasedCetaceanDensity2016] to describe the distribution of the critically endangered Rice's whale (*Balaenoptera ricei*), a new density surface model [@litzCetaceanSeaTurtle2022] has been made available. Importantly, this model extends the distribution of Rice's whale beyond its initial core habitat in the Eastern Gulf of Mexico to the West, where it had previously only been acoustically detected [@soldevillaRiceWhalesNorthwestern2022]. This report replicates the Biological Opinion's ship-strike analysis using the newer Rice's whale distributional model. Given the wider distribution of Rice's whale, an alternative new Whale Area is suggested to reduce ship-strike risk with the Rice's whale based simply on location (25.5º N and higher) and depth (100 to 400 m).
@@ -120,11 +137,11 @@ map_rast(
   add_ply_wab = T)
 ```
 
-The original Whale Area --- the habitat area that, pursuant to the Biological Opinion, was subject to vessel speed limits and other measures --- was defined in the Biological Opinion [p. 292 of @nmfsBiologicalOpinionFederally2020] as follows:
+The original Whale Area (pink outline in @fig-map-whales-old) --- the habitat area that, pursuant to the Biological Opinion, was subject to vessel speed limits and other measures --- was defined in the Biological Opinion [p. 292 of @nmfsBiologicalOpinionFederally2020] as follows:
 
-> ...the area from 100- to 400- meter isobaths from 87.5° W to 27.5° N as described in the status review [@roselStatusReviewBryde2016] plus an additional 10 km around that area.
+> ...the area from 100- to 400-meter isobaths from 87.5° W to 27.5° N as described in the status review [@roselStatusReviewBryde2016] plus an additional 10 km around that area.
 
-This new Whale Area captures 94% of the densities derived from the new surface model [@litzCetaceanSeaTurtle2022], as compared to the much smaller proportion (52%) that would be captured within the original Whale Area (@tbl-whales-by-area). Adding the same 10 km buffer from the original Biological Opinion (pink outline in @fig-map-whales-old) to the 100-400m strip based on the newer density model [@litzCetaceanSeaTurtle2022] (red outline in @fig-map-whales-new), results in only a tiny marginal improvement in capturing whale densities (97% with 10 km buffer vs. 94% without). For purposes of defining a new Whale Area in which vessel mitigation measures could apply, the benefit of ease of navigation, based on a simpler area description with only a southern limit and depth range defined, may outweigh this marginal improvement.
+A new Whale Area (red outline in @fig-map-whales-new) was similarly formed by these 100- to 400-meter isobaths but now extends across to the western Gulf of Mexico. The southern boundary was defined by extracting the southern limit of the 90% contour around the new whale density surface [@litzCetaceanSeaTurtle2022]. This new Whale Area captures 94% of the densities derived from the new surface model [@litzCetaceanSeaTurtle2022], as compared to the much smaller proportion (52%) that would be captured within the original Whale Area (@tbl-whales-by-area). Adding the same 10 km buffer from the original Biological Opinion (pink outline in @fig-map-whales-old) to the 100-400m strip based on the newer density model [@litzCetaceanSeaTurtle2022] (red outline in @fig-map-whales-new), results in only a tiny marginal improvement in capturing whale densities (97% with 10 km buffer vs. 94% without). For purposes of defining a new Whale Area in which vessel mitigation measures could apply, the benefit of ease of navigation, based on a simpler area description with only a southern limit and depth range defined, may outweigh this marginal improvement.
 
 ```{r}
 #| label: fig-map-whales-new

@@ -17,7 +17,7 @@ Per [Areas Under Restriction | Bureau of Ocean Energy Management](https://www.bo
 #| label: prep
 
 source(here::here("scripts/functions.R"))
-source(here("scripts/paths.R"))
+source(here::here("scripts/paths.R"))
 
 # read data ----
 # transform all to geographic projection (4326)
@@ -566,7 +566,7 @@ stk_rast   <- rast(rast_tif)
 r_wan <- (
   r_depth >= 100 &
   r_depth <= 400 & 
-  r_lat >= 25.5) |> 
+  r_lat   >= 25.5) |> 
   classify(cbind(F, NA))
 
 ply_wan <- as.polygons(r_wan) |> 
