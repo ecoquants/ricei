@@ -1,0 +1,256 @@
+---
+title: "Rice's Whale Vessel Risk Analysis by Owner in Gulf of America"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+## Vessel Presence
+
+- source: [benioff-ocean-initiative.gulf_of_mexico_2023.vessel_presence_bymmsi_10_v1](https://console.cloud.google.com/bigquery?ws=!1m4!1m3!3m2!1sbenioff-ocean-initiative!2sgulf_of_mexico_2023)
+
+
+```{r}
+# Install and load required packages
+librarian::shelf(
+  arrow, bigrquery, dplyr, ggplot2, glue, terra, viridis)
+
+# mem.maxVSize()
+# [1] 24576 # Mb
+
+dir_data          <- "~/My Drive/projects/ricei/data"
+vesselpresence_bq <- "benioff-ocean-initiative.gulf_of_mexico_2023.vessel_presence_bymmsi_10_v1"
+vesselinfo_bq     <- "benioff-ocean-initiative.gulf_of_mexico_2023.ihs_data_all"
+
+# Authentication - this will prompt for authentication in browser
+# If you're running this in an automated environment, consider using service account authentication
+bq_auth()
+```
+
+```{r}
+# Define project and dataset information
+# project_id <- "benioff-ocean-initiative"
+# dataset_id <- "gulf_of_mexico_2023"
+# table_id   <- "vessel_presence_bymmsi_10_v1"
+
+# Define SQL query
+# Note: Using partition filtering on date for efficiency
+# sql <- glue("
+#   SELECT 
+#     cell_ll_lat,
+#     cell_ll_lon,
+#     dist_travelled_km,
+#     avg_speed_knots,
+#     CASE 
+#       WHEN avg_speed_knots <= 10 THEN '0-10'
+#       WHEN avg_speed_knots <= 12 THEN '10-12'
+#       WHEN avg_speed_knots <= 15 THEN '12-15'
+#       ELSE '15+'
+#     END AS speed_bin
+#   FROM `{project_id}.{dataset_id}.{table_id}`
+#   WHERE date BETWEEN '2023-01-01' AND '2023-12-31'
+#     AND cell_ll_lat IS NOT NULL
+#     AND cell_ll_lon IS NOT NULL
+#     AND dist_travelled_km IS NOT NULL
+#     AND avg_speed_knots IS NOT NULL")
+
+# data <- bq_table_download(bq_project_query(project_id, sql))
+# Error in `bq_post()`:
+# ! Access Denied: Project benioff-ocean-initiative: User does not have
+#   bigquery.jobs.create permission in project benioff-ocean-initiative.
+#   [accessDenied]
+# bq_tbl <- bq_table(project_id, dataset_id, table_id)
+
+for (tbl_bq in c(vesselpresence_bq, vesselinfo_bq)){
+
+  message(glue("Fetching data from BigQuery: {tbl_bq} ~ {Sys.time()}"))
+  p <- unlist(strsplit(tbl_bq, "[.]"))
+  
+  bq_tbl <- bq_table(p[1], p[2], p[3])
+  
+  # iterate over 1 gb chunks, given number of rows per chunk
+  gb_tbl   <- as.vector(bq_table_size(bq_tbl)) / 1000^3
+  nrow_tbl <- bq_table_nrow(bq_tbl)
+  gb_i     <- 1                         # 1 GB chunks
+  n_i      <- ceiling(gb_tbl   / gb_i)  # number of chunks;          53
+  nrow_i   <- ceiling(nrow_tbl / n_i )  # rows per chunk;    16,934,451
+  
+  row_beg <- 0
+  for (i in 1:n_i){ # i = 1
+    
+    pq <- glue("{dir_data}/raw/ships/{p[2]}/{p[3]}/chunk_{sprintf('%02d', i)}.parquet")
+    dir.create(dirname(pq), recursive = T, showWarnings = F)
+    
+    if (file.exists(pq)) {
+      row_beg <- row_beg + nrow_i
+      next
+    }
+    
+    message(glue("- reading chunk {i}: row {row_beg} to {min(row_beg + nrow_i, nrow_tbl)} ~ {Sys.time()}"))
+    # reading chunk 1: 0 to 16934451 ~ 2025-04-14 18:16:55.603398
+    # reading chunk 2: 16934451 to 33868902 ~ 2025-04-14 18:17:44.441115
+    # reading chunk 36: 592705785 to 609640236 ~ 2025-04-14 21:40:13.27480
+    # reading chunk 49: 812853648 to 829788099 ~ 2025-04-14 21:50:19.7238173
+    data <- bq_table_download(
+      bq_tbl,
+      start_index = row_beg,
+      n_max       = nrow_i)
+    # Downloading first chunk of data.Received 127,988 rows in the first chunk.
+    # Downloading the remaining 16,806,463 rows in 176 chunks of (up to) 95,991 rows.
+    
+    message(glue("-   writing chunk {i} to {basename(pq)} ~ {Sys.time()}"))
+    # writing chunk 1 to chunk_01.parquet ~ 2025-04-14 18:17:41.160944
+    write_parquet(data, pq) # compression = default_parquet_compression() = "snappy"
+    
+    row_beg <- row_beg + nrow_i
+  }
+}
+```
+
+- <https://arrow.apache.org/docs/r/articles/arrow.html#multi-file-data-sets>
+
+TODO:
+
+- [ ] raster of GoA vs global
+- [ ] duckdb comparison of dates
+  - [R Client – DuckDB](https://duckdb.org/docs/stable/clients/r.html)\
+  
+    ```r
+    # Establish a set of Parquet files
+    dbExecute(con, "COPY flights TO 'dataset' (FORMAT parquet, PARTITION_BY (year, month))")
+  
+    # Summarize the dataset in DuckDB to avoid reading 12 Parquet files into R's memory
+    tbl(con, "read_parquet('dataset/**/*.parquet', hive_partitioning = true)") |>
+      filter(month == "3") |>
+      summarise(delay = mean(dep_time, na.rm = TRUE)) |>
+      collect()
+    ```
+  - [Querying Parquet with Precision Using DuckDB – DuckDB](https://duckdb.org/2021/06/25/querying-parquet.html)\
+    consider paritioning, ordering, indexing 
+    - [Working with multi-file data sets • Arrow R Package](https://arrow.apache.org/docs/r/articles/dataset.html#partitioning-performance-considerations)
+
+  
+
+```{r}
+#| label: summarize
+
+vesselpresence_bq <- "benioff-ocean-initiative.gulf_of_mexico_2023.vessel_presence_bymmsi_10_v1"
+
+dir_vpres <- glue("{dir_data}/raw/ships/gulf_of_mexico_2023/vessel_presence_bymmsi_10_v1")
+d_vpres <- open_dataset(dir_vpres)
+head(d_vpres) |> collect()
+
+# TODO: sort (date, mmsi, cell_ll_lon, cell_ll_lat) and save as a single parquet file
+d_vpres_date <- d_vpres |> 
+  group_by(date) |> 
+  summarize(
+    n                 = n(),
+    dist_travelled_km = sum(dist_travelled_km, na.rm = T),
+    avg_speed_knots   = mean(avg_speed_knots, na.rm = T)) |>
+  arrange(date) |> 
+  collect()
+d_vpres_date |> View()
+
+d_vpres_ll <- d_vpres |> 
+  group_by(cell_ll_lon, cell_ll_lat) |> 
+  summarize(
+    n                 = n(),
+    dist_travelled_km = sum(dist_travelled_km, na.rm = T),
+    avg_speed_knots   = mean(avg_speed_knots, na.rm = T)) |>
+  arrange(cell_ll_lon, cell_ll_lat) |> 
+  collect()
+
+d_vpres_ll <- d_vpres_ll |>
+  
+  diff(round(d_vpres_ll$cell_ll_lon, 1)) |> table()
+range(d_vpres_ll$cell_ll_lon) # -180.0  179.9
+range(d_vpres_ll$cell_ll_lat) # -89.0  89.8
+  
+
+# Process the data
+message("Processing data...")
+# Aggregate by cell and speed bin
+raster_data <- data |> 
+  group_by(cell_ll_lon, cell_ll_lat, speed_bin) |> 
+  summarize(total_dist = sum(dist_travelled_km, na.rm = TRUE)) |> 
+  ungroup()
+
+# Get unique coordinates to determine raster dimensions
+unique_lons <- sort(unique(raster_data$cell_ll_lon))
+unique_lats <- sort(unique(raster_data$cell_ll_lat))
+
+# Determine cell resolution based on data
+lon_res <- min(diff(unique_lons))
+lat_res <- min(diff(unique_lats))
+
+# Create empty rasters for each speed bin
+speed_bins <- c("0-10", "10-12", "12-15", "15+")
+rasters <- list()
+
+# Define raster extent
+e <- extent(
+  min(unique_lons) - (lon_res/2),
+  max(unique_lons) + (lon_res/2),
+  min(unique_lats) - (lat_res/2),
+  max(unique_lats) + (lat_res/2)
+)
+
+message("Creating rasters...")
+for (bin in speed_bins) {
+  # Filter data for this speed bin
+  bin_data <- raster_data %>% filter(speed_bin == bin)
+  
+  # Create an empty raster
+  r <- raster(e, resolution = c(lon_res, lat_res))
+  
+  # Populate the raster
+  for (i in 1:nrow(bin_data)) {
+    cell <- cellFromXY(r, c(bin_data$cell_ll_lon[i], bin_data$cell_ll_lat[i]))
+    r[cell] <- bin_data$total_dist[i]
+  }
+  
+  # Store in list
+  rasters[[bin]] <- r
+}
+
+# Create a combined raster
+combined_raster <- rasters[["0-10"]] # Initialize with first raster
+combined_raster[is.na(combined_raster)] <- 0 # Replace NA with 0
+
+# Add all bins with proper names
+names(combined_raster) <- "0-10 knots"
+
+for (bin in speed_bins[-1]) {
+  r <- rasters[[bin]]
+  r[is.na(r)] <- 0
+  combined_raster <- addLayer(combined_raster, r)
+}
+names(combined_raster)[2:4] <- c("10-12 knots", "12-15 knots", "15+ knots")
+
+# Save the raster to file
+writeRaster(combined_raster, "speed_binned_distances.tif", overwrite=TRUE)
+
+# Plot the results
+message("Creating visualization...")
+par(mfrow=c(2,2))
+for (i in 1:4) {
+  plot(combined_raster[[i]], main=names(combined_raster)[i],
+       col=viridis(100), zlim=c(0, max(maxValue(combined_raster))),
+       axes=TRUE)
+}
+
+# Create a stack plot for all layers
+plot(combined_raster, col=viridis(100))
+
+message("Done! Results saved as 'speed_binned_distances.tif'")
+```
+
+You can add options to executable code like this
+
+```{r}
+#| echo: false
+2 * 2
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
