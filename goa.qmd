@@ -63,6 +63,8 @@ bq_auth()
 # bq_tbl <- bq_table(project_id, dataset_id, table_id)
 
 for (tbl_bq in c(vesselpresence_bq, vesselinfo_bq)){
+  # tbl_bq = vesselpresence_bq # 53 chunks
+  # tbl_bq = vesselinfo_bq     # 1  chunk
 
   message(glue("Fetching data from BigQuery: {tbl_bq} ~ {Sys.time()}"))
   p <- unlist(strsplit(tbl_bq, "[.]"))
@@ -129,7 +131,294 @@ TODO:
   - [Querying Parquet with Precision Using DuckDB – DuckDB](https://duckdb.org/2021/06/25/querying-parquet.html)\
     consider paritioning, ordering, indexing 
     - [Working with multi-file data sets • Arrow R Package](https://arrow.apache.org/docs/r/articles/dataset.html#partitioning-performance-considerations)
+    
+```{r}
+#| label: setup_duckdb
 
+librarian::shelf(
+  dplyr, duckdb, glue, readr)
+
+dir_tbl <- "/Users/bbest/Library/CloudStorage/GoogleDrive-ben@ecoquants.com/My Drive/projects/ricei/data/raw/ships/gulf_of_mexico_2023/"
+goa_db  <- glue("{dir_tbl}/goa.db")
+
+# Connect to DuckDB
+con <- dbConnect(duckdb(), dbdir = goa_db, read_only = F)
+```
+
+```{r load_duckdb}
+
+# Load Parquet files into DuckDB
+dbExecute(con, glue(
+  "CREATE TABLE ship_cell AS SELECT * FROM read_parquet('{dir_tbl}/vessel_presence_bymmsi_10_v1/*.parquet')") )
+# nrows: 897,525,872
+
+dbExecute(con, glue(
+  "CREATE TABLE ship AS SELECT * FROM read_parquet('{dir_tbl}/ihs_data_all/*.parquet')") )
+# nrows:     236,134
+
+# Load Parquet files into DuckDB
+dbExecute(con, glue(
+  "CREATE OR REPLACE TABLE company AS SELECT * FROM read_csv('{dir_tbl}/companies.csv')") )
+# nrows:          16
+
+# glue("{dir_tbl}/companies.csv") |> read_csv()
+
+# dbExecute(con, "ALTER TABLE vessel_presence RENAME TO ship_cell")
+# dbExecute(con, "ALTER TABLE vessel_ihs RENAME TO ship")
+
+# Query the data
+# tbl(con, "ship_cell")
+# tbl(con, "ship")
+#    imo_lr_ihs_no      mmsi name_of_ship         callsign ship_type group_owner technical_manager shipmanager registered_owner operator
+#            <int>     <int> <chr>                <chr>    <chr>     <chr>       <chr>             <chr>       <chr>            <chr>   
+#  1       8352526 244184361 TENACIOUS            PH9945   Towing/P… CFT         CFT               CFT         CFT              CFT     
+#  2       9582893 244700202 AURISSE              PB7611   Chemical… CFT         CFT               CFT         CFT              CFT     
+#  3       9026148 345070136 PLATTE RIVER         XCCJ8    Crew Boat CSP         CSP               CSP         HSP              CSP     
+#  4       8600909 205114000 FELIX ANTOIE TSHISE… ORKO     Trailing… CVM         CVM               CVM         CVM              CVM     
+#  5       9314129 210761000 SALT LAKE CITY       C4DS2    Bulk Car… Diana Ship… DWM               DWM         Marfort Navigat… Uniper …
+#  6       9314129 210761000 SALT LAKE CITY       C4DS2    Bulk Car… OceanPal I… DWM               DWM         Marfort Navigat… Five Oc…
+#  7       9286633 311773000 PROTEFS              C6TT6    Bulk Car… OceanPal I… DWM               DWM         Cypres Enterpri… HSL Shi…
+#  8       9297929 311912000 CALIPSO              C6UH2    Bulk Car… Diana Ship… DWM               DWM         Darien Compania… Transgr…
+#  9       9297929 311912000 CALIPSO              C6UH2    Bulk Car… Diana Ship… DWM               DWM         Darien Compania… Transgr…
+# 10       9297929 311912000 CALIPSO              C6UH2    Bulk Car… Diana Ship… DWM               DWM         Darien Compania… Transgr…
+# # ℹ more rows
+# # ℹ 7 more variables: operator_code <int>, registered_owner_code <int>, chartered_from <chr>, source_table <chr>,
+# #   updated_date <date>, length_m <dbl>, weight_gt <int>
+
+tbl(con, "ship") |> 
+  group_by(mmsi) |> 
+  summarize(
+    n = n()) |> 
+  filter(n > 1) |> 
+  arrange(desc(n)) |> 
+  collect()
+# # A tibble: 28,107 × 2
+#         mmsi     n
+#        <int> <dbl>
+#  1 305293000    27
+#  2 636015872    27
+#  3 538002591    27
+d_dupe1 <- tbl(con, "ship") |> 
+  filter(mmsi == 305293000) |> 
+  relocate(updated_date) |> 
+  arrange(desc(updated_date)) |> 
+  collect()
+View(d_dupe1)
+```
+
+```{r}
+sc_date_n <- tbl(con, "ship_cell") |> 
+  filter(
+    cell_ll_lon >= !!b[1],
+    cell_ll_lat >= !!b[2],
+    cell_ll_lon <= !!b[3],
+    cell_ll_lat <= !!b[4]) |>
+  group_by(date) |> 
+  summarize(
+    n = n()) |> 
+  arrange(date) |> 
+  collect()
+# View(sc_date_n)
+# surprising:
+# - gaps in dates (59 days with data / 365 days)
+# - spikes in data with 3 orders of magnitude diff, 
+#   eg 2023-01-29 127,908 to 2023-01-31 123,249,963
+
+librarian::shelf(dygraphs)
+
+dygraph(sc_date_n, main = "Ship Presence in Gulf by Date") |> 
+  dySeries("n", label = "Number of Records") |> 
+  dyAxis("y", label = "Records") |> 
+  dyRangeSelector() |> 
+  dyOptions(
+    strokeWidth = 1, 
+    drawPoints  = T,
+    pointSize   = 2)
+```
+
+```{r}
+librarian::shelf(stringr)
+
+d_c <- tbl(con, "company") |> 
+  collect()
+
+for (i in 1:nrow(d_c)){ # i = 1
+  company         <- d_c$company[i]
+  operator_lookup <- d_c$operator_lookup[i]
+  
+  message(company)
+  
+  d <- dbGetQuery(
+    con,
+    glue("
+         SELECT operator, operator_code FROM ship 
+         WHERE
+           operator ILIKE '%{company}%'
+         ")) |> 
+    collect() |> 
+    tibble()
+  message(glue("  {company}: "), nrow(d))
+  d |> table() |> print()
+  
+  d2 <- dbGetQuery(
+    con,
+    glue("
+         SELECT operator, operator_code FROM ship 
+         WHERE
+           operator ILIKE '%{operator_lookup}%'
+         ")) |> 
+    collect() |> 
+    tibble()
+  message(glue("  {operator_lookup}: "), nrow(d2),"\n")
+  d2 |> table() |> print()
+}
+
+#                                operator_code
+# operator                         387 4427 28896 194433 259393 1826240 6514732
+#   CMA CGM Asia Pacific Ltd         0    0     2      0      0       0       0
+#   CMA CGM Asia Shipping Pte Ltd    0    0     0      0      0       3       0
+#   CMA CGM Philippines Shipping     0    0     0      0      0       0       1
+#   CMA CGM SA The French Line    1544    0     0   1225      0       0       0
+#   Containerships-CMA CGM GmbH      0    1     0      0     13       0       0
+```
+
+
+
+```{r grid}
+librarian::shelf(
+  here, janitor, leaflet, sf, terra)
+
+dir_raw    <- "~/My Drive/projects/ricei/data/raw" # Google Drive
+whales_shp <- glue("{dir_raw}/whales/Rices_Whale_Monthly_Density.shp")
+
+# hex of whales
+h_w <- read_sf(whales_shp) |>    # nrow: 42,908
+  clean_names() |>
+  mutate(
+    hexid = as.integer(hexid),
+    across(where(is.numeric), ~na_if(., -9999))) |> 
+  st_transform(4326)
+
+bb <- st_bbox(h_w) |> 
+  st_as_sfc()
+#      xmin      ymin      xmax      ymax 
+# -97.89111  18.12907 -80.33379  30.77506
+
+# h_w <- h_w |>   
+#   filter(!if_all(Jan_n:Dec_cv, is.na)) # nrow: 33,650
+# st_bbox(h_w)
+
+leaflet() |> 
+  addProviderTiles("Esri.OceanBasemap") |> 
+  addPolygons(
+    data        = h_w,
+    fillColor   = "blue",
+    fillOpacity = 0.5,
+    color       = "black",
+    weight      = 1,
+    opacity     = 1,
+    label       = ~glue("Hex ID: {HEXID}")) # |> 
+  # setView(lng = -89, lat = 25, zoom = 5) # zoom: 5
+
+r_10 <- terra::rast(
+  ext(h_w),
+  resolution = c(0.1, 0.1)) # 10th degree resolution
+
+# r_tif <- here("data/rasters.tif")
+# r <- rast(r_tif)
+# names(r)
+
+b <- st_bbox(h_w) |> as.numeric()
+
+d_cell_n <- tbl(con, "ship_cell") |> 
+  filter(
+    cell_ll_lon >= !!b[1],
+    cell_ll_lat >= !!b[2],
+    cell_ll_lon <= !!b[3],
+    cell_ll_lat <= !!b[4]) |>
+  group_by(cell_ll_lon, cell_ll_lat) |> 
+  summarize(n = n()) |> 
+  collect()  # 16,532 × 3
+
+r_n <- d_cell_n |> 
+  vect(
+    geom = c("cell_ll_lon", "cell_ll_lat"),
+    crs = "EPSG:4326", keepgeom = T) |>
+  terra::rasterize(
+    r_10,
+    field = "n",
+    fun   = "sum")
+
+names(r_n) <- 
+
+plet(log10(r_n), tiles="Esri.OceanBasemap", main = "log10(# ship<br>presence<br>records), 2023<br>(log10)")
+providers$
+librarian::shelf(
+  tidyr)
+
+d_w <- h_w |>
+  st_drop_geometry() |> 
+  pivot_longer(
+    !hexid, 
+    names_to  = "metric",
+    values_to = "value") |> 
+  filter(!is.na(value)) |> 
+  separate_wider_delim(
+    metric, "_", 
+    names = c("month", "metric"))
+
+d_w_avg <- d_w |> 
+  group_by(
+    hexid, metric) |> 
+  summarize(
+    value = mean(value),
+    .groups = "drop")
+    
+d_w_all <- bind_rows(
+  d_w_avg |> 
+    mutate(
+      timespan = "avg"),
+  d_w |> 
+    mutate(
+      timespan = "month")) |> 
+  select(hexid, timespan, month, metric, value)
+
+r_w <- d_cell_n |> 
+  vect(
+    geom = c("cell_ll_lon", "cell_ll_lat"),
+    crs = "EPSG:4326", keepgeom = T) |>
+  terra::rasterize(
+    r_10,
+    field = "n",
+    fun   = "sum")
+    
+    sf_use_s2(F)
+    ply_whales <- hex_whales |> 
+      select(hex_id) |> 
+      filter(hex_id %in% unique(tbl_whales_avg$hex_id)) |> 
+      st_intersection(
+        plys_study) |> 
+      group_by(
+        hex_id) |> 
+      summarize() |> 
+      mutate(
+        area_km2 = st_area(geometry) |> set_units("km^2"))
+    sf_use_s2(T)
+```
+
+```{r co_cell}
+d_company <- tbl(con, "company") |> 
+  collect()
+
+co <- d_company$company[1]
+op <- d_company$operator_lookup[1]
+
+tbl(con, "cell") |> 
+  left_join(
+    tbl(con, "ship_cell"),
+    by = c("cell_ll_lon", "cell_ll_lat")) |>
+
+```
   
 
 ```{r}
@@ -150,7 +439,15 @@ d_vpres_date <- d_vpres |>
     avg_speed_knots   = mean(avg_speed_knots, na.rm = T)) |>
   arrange(date) |> 
   collect()
-d_vpres_date |> View()
+# d_vpres_date |> View()
+#   date       cell_ll_lat cell_ll_lon mmsi      hours dist_travelled_km avg_speed_knots
+#   <date>           <dbl>       <dbl> <chr>     <dbl>             <dbl>           <dbl>
+# 1 2023-10-07       -42.5       -62.8 636022759 0.083              2.01           13.4 
+# 2 2023-10-07       -41.3       -62.1 636022759 0.083              2.08           13.7 
+# 3 2023-10-07       -38.6       144.  352002415 0.083              1.47            9.58
+# 4 2023-10-07       -38.3       145.  352002415 0.083              1.93           13.1 
+# 5 2023-10-07       -38.1       144.  352002415 0.083              1.18            7.66
+# 6 2023-10-07       -37.5       102.  994210602 0.083              1.22            7.91
 
 d_vpres_ll <- d_vpres |> 
   group_by(cell_ll_lon, cell_ll_lat) |> 
@@ -248,9 +545,7 @@ message("Done! Results saved as 'speed_binned_distances.tif'")
 
 You can add options to executable code like this
 
-```{r}
-#| echo: false
-2 * 2
+```{r db_disconnect}
+# Disconnect from DuckDB
+dbDisconnect(con, shutdown = TRUE)
 ```
-
-The `echo: false` option disables the printing of code (only output is displayed).
