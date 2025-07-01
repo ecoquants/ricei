@@ -1,0 +1,130 @@
+---
+title: "gfwr"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+librarian::shelf(
+  dplyr,GlobalFishingWatch/gfwr)
+
+tkn_txt <- "~/My Drive/private/gfwr_token.txt"
+
+Sys.setenv(GFW_TOKEN = readLines(tkn_txt))
+key <- gfw_auth()
+
+get_vessel_info(
+  query       = 224224000,
+  search_type = "search",
+  key         = key)
+
+mmsi_search <- get_vessel_info(224224000)
+# 1 total vessels
+
+
+get_vessel_info(where = "imo = '8300949'")
+get_vessel_info(where = "imo = '8300949' AND ssvid = '214182732'")
+get_vessel_info(where = "shipname LIKE '%GABU REEFE%' OR imo = '8300949'")
+
+x <- get_vessel_info(where = "registryOwners.name LIKE '%STOLT%'", key = key)
+y <- get_vessel_info(where = "registryOwners.name LIKE '%STOLT TANKERS%'", key = key)
+ssvid <- y$registryInfo$ssvid # 636017838
+y$combinedSourcesInfo
+vid <- y$combinedSourcesInfo$vesselId[1] # "00c75c57c-c883-3604-79a2-15bd75ed1473"
+
+get_vessel_info(636017838)
+
+d_e_l <- get_event(
+  # event_type = c("FISHING", "GAP", "LOITERING", "PORT_VISIT"),
+  event_type = "LOITERING",
+  vessels    = vid,
+  start_date = "2021-01-01",
+  end_date   = "2021-12-31",
+  # confidence = c(3, 4), # only for port visits
+  key = gfw_auth())
+d_e_p <- get_event(
+  # event_type = c("FISHING", "GAP", "LOITERING", "PORT_VISIT"),
+  event_type = "PORT_VISIT",
+  vessels    = vid,
+  start_date = "2021-01-01",
+  end_date   = "2021-12-31",
+  # confidence = c(3, 4), # only for port visits
+  key = gfw_auth())
+
+get_region_id(region_name = "United States", region_source = "EEZ")
+usa_eez_id <- 8456
+
+
+# using region codes
+code_eez <- get_region_id(region_name = 'CIV', region_source = 'EEZ',
+                          key = gfw_auth())
+df_r <- get_raster(spatial_resolution = 'LOW',
+           temporal_resolution = 'YEARLY',
+           group_by = 'FLAG',
+           start_date = "2021-01-01",
+           end_date = "2021-10-01",
+           region = code_eez$id,
+           region_source = 'EEZ',
+           key = gfw_auth(),
+           print_request = TRUE)
+#using a sf from disk /loading a test sf object
+data(test_shape)
+get_raster(spatial_resolution = 'LOW',
+            temporal_resolution = 'YEARLY',
+            start_date = '2021-01-01',
+            end_date = '2021-10-01',
+            region = test_shape,
+            region_source = 'USER_SHAPEFILE',
+            key = gfw_auth(),
+            print_request = TRUE)
+
+# Use get_region_id function to get EEZ code for Italy
+ita_eez_code <- get_region_id(region_name = "ITA", region_source = "EEZ", key = gfw_auth())
+
+start_date <- '2021-01-01'
+end_date <- '2021-03-31'
+
+# Download data for the Italian EEZ
+eez_fish_df <- get_raster(
+  spatial_resolution = "HIGH",
+  temporal_resolution = "YEARLY",
+  group_by = "FLAG",
+  start_date = start_date,
+  end_date = end_date,
+  region = ita_eez_code$id,
+  region_source = "EEZ")
+
+d_r <- get_raster( # 39,800 × 5
+  spatial_resolution = "LOW",
+  temporal_resolution = "MONTHLY",
+  start_date = "2021-01-01",
+  end_date = "2021-12-31",
+  region_source = "EEZ",
+  region = usa_eez_id,
+  # group_by = NULL,
+  # filter_by = NULL,
+  # key = gfw_auth(),
+  print_request = T)
+```
+
+```
+httr2::req_body_json()
+https://gateway.api.globalfishingwatch.org/v3/4wings/report?datasets%5B0%5D=public-global-fishing-effort%3Alatest&spatial-resolution=LOW&temporal-resolution=YEARLY&date-range=2017-01-01%2C2025-04-10&format=CSV&key=
+
+  utils::URLdecode("https://gateway.api.globalfishingwatch.org/v3/4wings/report?datasets%5B0%5D=public-global-fishing-effort%3Alatest&spatial-resolution=LOW&temporal-resolution=YEARLY&date-range=2017-01-01%2C2025-04-10&format=CSV")
+
+# https://gateway.api.globalfishingwatch.org/v3/4wings/report?datasets[0]=public-global-fishing-effort:latest&spatial-resolution=LOW&temporal-resolution=YEARLY&date-range=2017-01-01,2025-04-10&format=CSV
+# https://gateway.api.globalfishingwatch.org/v3/4wings/report?datasets[0]=public-global-fishing-effort:latest&spatial-resolution=LOW&temporal-resolution=YEARLY&date-range=2017-01-01,2025-04-10&format=CSV&key=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtpZEtleSJ9.eyJkYXRhIjp7Im5hbWUiOiJ3aGFsZXNhZmUiLCJ1c2VySWQiOjQ5NTksImFwcGxpY2F0aW9uTmFtZSI6IndoYWxlc2FmZSIsImlkIjoxNCwidHlwZSI6InVzZXItYXBwbGljYXRpb24ifSwiaWF0IjoxNjU2MDg5MTk3LCJleHAiOjE5NzE0NDkxOTcsImF1ZCI6ImdmdyIsImlzcyI6ImdmdyJ9.AqypMA9kpyHxvjE0PCnAueDJoudf0P06ZR7CPBMvRW9y_vI7Sd12CZd9k6mH0BZKUAtRQQ_N-reiMOkKtgG0C4ZB1u1xM9WS2zIRm97zm786v6OxYY69AIsJiCXRyfWMaqiVHwZnZpSPsdsq_MUXWVQA0JDEtR5w0WpRdOrKfkQO88iYQWHF3l4hqUuJouswwsCjHqviE5O6L7qnN29zavuNnGPKa5m-LD8nMfcax-xiTs2h-5aTyUujy7mbtNPITS7xbHl_nU5PTXCOT79cwRKhjrD2tHNv5DdhMwBtkqKV_J5B91qcSFuT_Qz3Ag5qEaExqQlqfeAP1RNvl0bZBcE15SwYDzF84UmtBd8a6ogcAmFnIfmlR56V9Y2x_ro70YrwC5rXdt5wo2GP-Y2x4hqOBAtDXcQQX-I60wo5te2lH2Jl03gAF5Dkpt22yLx1kvgFbPmwELqwDohNxCzKi-GdG8zdhbco-cQFLlJevlvQzT0NSUl__8-rP0U9RyJ3
+
+
+req_url_query(`api-key` = my_key, isbn = 9780307476463) # ...
+```
+
+```
+curl --location --request GET 'https://gateway.api.globalfishingwatch.org/v3/vessels/search?query=368045130&datasets[0]=public-global-vessel-identity:latest&includes[0]=MATCH_CRITERIA&includes[1]=OWNERSHIP&includes[2]=AUTHORIZATIONS' \
+  -H "Authorization: Bearer [TOKEN]"
+```
+
+- [gateway.api.globalfishingwatch.org/v3/vessels/search](https://gateway.api.globalfishingwatch.org/v3/vessels/search?includes[0]=MATCH_CRITERIA&includes[1]=OWNERSHIP&datasets[0]=public-global-vessel-identity%3Av3.0&datasets[1]=public-chile-vessel-identity-fishing%3Av20211126&datasets[2]=public-chile-vessel-identity-non-fishing%3Av20211126&datasets[3]=public-ecuador-vessel-identity-fishing%3Av20211126&datasets[4]=public-norway-vessel-identity-fishing%3Av20220112&datasets[5]=public-norway-vessel-identity-non-fishing%3Av20220112&datasets[6]=public-png-vessel-identity-fishing%3Av20230210&datasets[7]=public-peru-vessel-identity-fishing%3Av20211126&datasets[8]=public-bra-onyxsat-vessel-identity-fishing%3Av20211126&where=registryOwners.name%20LIKE%20%27*STOLT*%27&since=)

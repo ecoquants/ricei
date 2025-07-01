@@ -6,29 +6,202 @@ editor_options:
   chunk_output_type: console
 ---
 
-## Vessel Presence
+## Overview
+
+```{r setup}
+# Install and load required packages
+librarian::shelf(
+  dplyr, duckdb, duckdbfs, ggplot2, glue, here, janitor, leafgl, leaflet, leaflet.extras, mapview,
+  readr, sf, stringr, terra, units, viridis)
+
+mapviewOptions(
+  basemaps       = "Esri.OceanBasemap",
+  vector.palette = \(n) grDevices::hcl.colors(n, palette = "Spectral", rev = T),
+  raster.palette = \(n) grDevices::hcl.colors(n, palette = "Spectral", rev = T) )
+
+options(readr.show_col_types = F)
+
+dir_data      <- "~/My Drive/projects/ricei/data"
+ship_cell_bq  <- "benioff-ocean-initiative.gulf_of_mexico_2023.vessel_presence_bymmsi_10_v1"
+ship_bq       <- "benioff-ocean-initiative.gulf_of_mexico_2023.ihs_data_all"
+nmfs_gdb      <- "~/My Drive/projects/msens/data/raw/fisheries.noaa.gov/NMFS_ESA_Critical_Habitat_20230505.gdb"
+crithab_geo   <- here("data/nmfs_crit_hab.geojson")
+subareas_shp  <- glue("{dir_data}/raw/Rice's Whale Proposed Critical Habitat Sub-Areas/Rice\'s Whale Proposed Critical Habitat Sub-Areas.shp")
+subareas_geo  <- here("data/crithab_subareas.geojson")
+dir_tbl       <- glue("{dir_data}/raw/ships/gulf_of_mexico_2023/")
+companies_csv <- glue("{dir_tbl}/companies.csv")
+goa_db        <- glue("{dir_tbl}/goa.db")
+whales_geo  <- here("data/whales.geojson") # hex_id:  whale densities by hexagon
+whales_csv  <- here("data/whales.csv")
+
+# Connect to DuckDB
+con <- dbConnect(duckdb(), dbdir = goa_db, read_only = F)
+load_spatial(con)
+```
+
+## Read Whale Density Hexagons
+
+```{r read_whale_densities}
+h_whales <- read_sf(whales_geo) |> # [h]exagons
+  st_make_valid() 
+d_whales <- read_csv(whales_csv)   # [d]ata
+
+# h_whales
+# Simple feature collection with 13296 features and 2 fields
+# Geometry type: POLYGON
+# Dimension:     XY
+# Bounding box:  xmin: -97.02703 ymin: 23.83333 xmax: -80.45734 ymax: 30.17497
+# Geodetic CRS:  WGS 84
+# # A tibble: 13,296 × 3
+#    hex_id area_km2                        geometry
+#     <dbl>    <dbl>                   <POLYGON [°]>
+#  1 136253     39.5 ((-86.93031 30.09746, -86.9586…
+#  2 136254     39.5 ((-86.7977 30.08583, -86.83793…
+#  3 136255     39.5 ((-86.67701 30.0751, -86.71723…
+#  4 136256     39.5 ((-86.55635 30.06422, -86.5965…
+#  5 136257     39.5 ((-86.43572 30.05321, -86.4759…
+#  6 136258     39.5 ((-86.31513 30.04205, -86.3553…
+#  7 136646     39.5 ((-86.93031 30.03624, -86.9656…
+#  8 136647     39.5 ((-86.80477 30.02523, -86.8449…
+#  9 136648     39.5 ((-86.68417 30.0145, -86.72437…
+# 10 136649     39.5 ((-86.56361 30.00364, -86.6037…
+#
+# d_whales
+# A tibble: 518,544 × 5
+#    hex_id timespan month metric           value
+#     <dbl> <chr>    <chr> <chr>            <dbl>
+#  1 136253 avg      NA    cv        13.7        
+#  2 136253 avg      NA    n_per_km2  0.00000125 
+#  3 136253 avg      NA    se         0.00158    
+#  4 136254 avg      NA    cv        12.3        
+#  5 136254 avg      NA    n_per_km2  0.00000201 
+#  6 136254 avg      NA    se         0.00279    
+#  7 136255 avg      NA    cv        14.7        
+#  8 136255 avg      NA    n_per_km2  0.000000993
+#  9 136255 avg      NA    se         0.00148    
+# 10 136256 avg      NA    cv        14.9 
+# 
+# d_whales$timespan |> table()
+#    avg  month 
+#  39888 478656
+#
+# d_whales$month |> table()
+#   apr   aug   dec   feb   jan   jul   jun   mar   may   nov   oct   sep 
+# 39888 39888 39888 39888 39888 39888 39888 39888 39888 39888 39888 39888
+
+h_w_n <- h_whales |> 
+  left_join(
+    d_whales |> 
+      filter(
+        timespan == "avg",
+        metric   == "n_per_km2") |> 
+      select(hex_id, value) |> 
+      mutate(
+        n_per_1000km2 = value * 1000),
+    by = "hex_id") |> 
+  relocate(n_per_1000km2)
+
+cols <- makeColorMatrix(~n_per_1000km2, h_w_n, "Spectral", reverse = T)
+
+pal <- colorNumeric(
+  palette = "Spectral",
+  reverse = T,
+  domain  = h_w_n$n_per_1000km2)
+
+leaflet() |>
+  addProviderTiles(provider = providers$Esri.OceanBasemap) |>
+  addGlPolygons(data = h_w_n, color = cols, popup = TRUE) |> 
+  addLegend(
+    pal    = pal, 
+    values = range(h_w_n$n_per_1000km2), 
+    title  = "whales per<br>1,000 km^2")
+```
+
+## Read Critical Habitat Polygon
+
+```{r read_crithab}
+# Read NMFS Critical Habitat
+
+if (!file.exists(crithab_geo)) {
+  message("Reading NMFS Critical Habitat from GDB...")
+  
+  # st_layers(nmfs_gdb) |> 
+  #   tibble() |> 
+  #   select(name, features, fields) |> 
+  #   filter(str_detect(name, "Rice"))
+  #   name                         features fields
+  #   <chr>                           <dbl>  <dbl>
+  # 1 Proposed_RicesWhale_20230724        1     20  
+
+  ply_crithab <- read_sf(nmfs_gdb, layer = "Proposed_RicesWhale_20230724") |> 
+    clean_names() |> 
+    select(-shape_area, -shape_length) |> 
+    st_set_crs(4326) |>
+    mutate(
+      area_km2 = st_area(Shape) |> set_units("km^2"))
+  st_geometry(ply_crithab) <- "geometry"
+  
+  write_sf(ply_crithab, crithab_geo, delete_dsn = TRUE)
+}
+ply_crithab <- read_sf(crithab_geo)
+
+mapView(
+  ply_crithab, 
+  col.regions = "red",
+  layer.name = "critical habitat") %>%
+  .@map |> 
+  addFullscreenControl()
+```
+
+## Read Subarea Polygons
+
+```{r read_subareas}
+# Read Rice's Whale Proposed Critical Habitat Sub-Areas
+if (!file.exists(subareas_geo)) {
+  message("Reading Rice's Whale Proposed Critical Habitat Sub-Areas from Shapefile...")
+  
+  ply_subareas <- read_sf(subareas_shp) |> 
+    clean_names() |> 
+    select(-shape_area, -shape_leng) |> 
+    rename(subarea_id = sub_area_i) |>
+    st_set_crs(4326) |>
+    mutate(
+      area_km2 = st_area(geometry) |> set_units("km^2"))
+  st_geometry(ply_crithab) <- "geometry"
+  
+  write_sf(ply_subareas, subareas_geo, delete_dsn = TRUE)
+}
+ply_subareas <- read_sf(subareas_geo)
+pts_subareas <- ply_subareas |> 
+  mutate(geometry = st_centroid(geometry))
+
+mapView(
+  ply_subareas, 
+  zcol       = "subarea_id",
+  layer.name = "subarea") %>%
+  .@map |> 
+  addFullscreenControl() |> 
+  addLabelOnlyMarkers(
+    data  = pts_subareas,
+    label = ~as.character(subarea_id), 
+    labelOptions = labelOptions(
+      noHide    = T,
+      direction = 'top',
+      textOnly  = T))
+```
+
+## Read Ship Cells
 
 - source: [benioff-ocean-initiative.gulf_of_mexico_2023.vessel_presence_bymmsi_10_v1](https://console.cloud.google.com/bigquery?ws=!1m4!1m3!3m2!1sbenioff-ocean-initiative!2sgulf_of_mexico_2023)
 
+```{r bigquery_to_parquet}
+#| eval: false
 
-```{r}
-# Install and load required packages
 librarian::shelf(
-  arrow, bigrquery, dplyr, ggplot2, glue, terra, viridis)
+  arrow, bigrquery)
 
-# mem.maxVSize()
-# [1] 24576 # Mb
+# old: run in bigquery ----
 
-dir_data          <- "~/My Drive/projects/ricei/data"
-vesselpresence_bq <- "benioff-ocean-initiative.gulf_of_mexico_2023.vessel_presence_bymmsi_10_v1"
-vesselinfo_bq     <- "benioff-ocean-initiative.gulf_of_mexico_2023.ihs_data_all"
-
-# Authentication - this will prompt for authentication in browser
-# If you're running this in an automated environment, consider using service account authentication
-bq_auth()
-```
-
-```{r}
 # Define project and dataset information
 # project_id <- "benioff-ocean-initiative"
 # dataset_id <- "gulf_of_mexico_2023"
@@ -62,9 +235,18 @@ bq_auth()
 #   [accessDenied]
 # bq_tbl <- bq_table(project_id, dataset_id, table_id)
 
-for (tbl_bq in c(vesselpresence_bq, vesselinfo_bq)){
-  # tbl_bq = vesselpresence_bq # 53 chunks
-  # tbl_bq = vesselinfo_bq     # 1  chunk
+# new: download from bigquery ----
+
+# mem.maxVSize()
+# [1] 24576 # Mb
+
+# Authentication - this will prompt for authentication in browser
+# If you're running this in an automated environment, consider using service account authentication
+bq_auth()
+
+for (tbl_bq in c(ship_cell_bq, ship_bq)){
+  # tbl_bq = ship_cell_bq # 53 chunks
+  # tbl_bq = ship_bq      # 1  chunk
 
   message(glue("Fetching data from BigQuery: {tbl_bq} ~ {Sys.time()}"))
   p <- unlist(strsplit(tbl_bq, "[.]"))
@@ -131,21 +313,9 @@ TODO:
   - [Querying Parquet with Precision Using DuckDB – DuckDB](https://duckdb.org/2021/06/25/querying-parquet.html)\
     consider paritioning, ordering, indexing 
     - [Working with multi-file data sets • Arrow R Package](https://arrow.apache.org/docs/r/articles/dataset.html#partitioning-performance-considerations)
-    
-```{r}
-#| label: setup_duckdb
 
-librarian::shelf(
-  dplyr, duckdb, glue, readr)
-
-dir_tbl <- "/Users/bbest/Library/CloudStorage/GoogleDrive-ben@ecoquants.com/My Drive/projects/ricei/data/raw/ships/gulf_of_mexico_2023/"
-goa_db  <- glue("{dir_tbl}/goa.db")
-
-# Connect to DuckDB
-con <- dbConnect(duckdb(), dbdir = goa_db, read_only = F)
-```
-
-```{r load_duckdb}
+```{r parquet_to_duckdb}
+#| eval: false
 
 # Load Parquet files into DuckDB
 dbExecute(con, glue(
@@ -158,13 +328,8 @@ dbExecute(con, glue(
 
 # Load Parquet files into DuckDB
 dbExecute(con, glue(
-  "CREATE OR REPLACE TABLE company AS SELECT * FROM read_csv('{dir_tbl}/companies.csv')") )
+  "CREATE OR REPLACE TABLE company AS SELECT * FROM read_csv('{companies_csv}')") )
 # nrows:          16
-
-# glue("{dir_tbl}/companies.csv") |> read_csv()
-
-# dbExecute(con, "ALTER TABLE vessel_presence RENAME TO ship_cell")
-# dbExecute(con, "ALTER TABLE vessel_ihs RENAME TO ship")
 
 # Query the data
 # tbl(con, "ship_cell")
@@ -206,7 +371,7 @@ d_dupe1 <- tbl(con, "ship") |>
 View(d_dupe1)
 ```
 
-```{r}
+```{r parquet_dates}
 sc_date_n <- tbl(con, "ship_cell") |> 
   filter(
     cell_ll_lon >= !!b[1],
@@ -236,7 +401,7 @@ dygraph(sc_date_n, main = "Ship Presence in Gulf by Date") |>
     pointSize   = 2)
 ```
 
-```{r}
+```{r company_ships}
 librarian::shelf(stringr)
 
 d_c <- tbl(con, "company") |> 
@@ -282,32 +447,7 @@ for (i in 1:nrow(d_c)){ # i = 1
 #   Containerships-CMA CGM GmbH      0    1     0      0     13       0       0
 ```
 
-
-
-```{r grid}
-librarian::shelf(
-  here, janitor, leaflet, sf, terra)
-
-dir_raw    <- "~/My Drive/projects/ricei/data/raw" # Google Drive
-whales_shp <- glue("{dir_raw}/whales/Rices_Whale_Monthly_Density.shp")
-
-# hex of whales
-h_w <- read_sf(whales_shp) |>    # nrow: 42,908
-  clean_names() |>
-  mutate(
-    hexid = as.integer(hexid),
-    across(where(is.numeric), ~na_if(., -9999))) |> 
-  st_transform(4326)
-
-bb <- st_bbox(h_w) |> 
-  st_as_sfc()
-#      xmin      ymin      xmax      ymax 
-# -97.89111  18.12907 -80.33379  30.77506
-
-# h_w <- h_w |>   
-#   filter(!if_all(Jan_n:Dec_cv, is.na)) # nrow: 33,650
-# st_bbox(h_w)
-
+```{r ship_cell_grid}
 leaflet() |> 
   addProviderTiles("Esri.OceanBasemap") |> 
   addPolygons(
@@ -320,9 +460,103 @@ leaflet() |>
     label       = ~glue("Hex ID: {HEXID}")) # |> 
   # setView(lng = -89, lat = 25, zoom = 5) # zoom: 5
 
+# bounding box of whale densities
+b_w <- h_whales |> 
+  st_union() |> 
+  st_as_sf() |> 
+  mutate(
+    one = 1)
+# mapView(b_w)
+
 r_10 <- terra::rast(
-  ext(h_w),
+  st_bbox(h_whales) |> 
+    st_as_sfc() |> 
+    st_buffer(0.1*110*1000) |> 
+    st_bbox() |> 
+    ext(),
   resolution = c(0.1, 0.1)) # 10th degree resolution
+
+r_10$cell_id <- 1:ncell(r_10)
+
+mapView(r_10) + 
+  mapView(h_whales)
+
+r_w <- terra::rasterize(
+  h_w_n, 
+  r_10,
+  field      = "n_per_1000km2",
+  # fun        = "mean",
+  # background = 0,
+  touches    = T)
+
+# DEBUG ----
+# TODO: rasterize every month
+mapView(r_w, zcol = "n_per_1000km2") +
+  mapView(h_w_n, zcol = "n_per_1000km2")
+
+r_s <- terra::rasterize(
+  ply_subareas, 
+  r_10,
+  field      = "subarea_id",
+  # fun        = "mean",
+  # background = 0,
+  touches    = T)
+# r_s2 <- terra::rasterize(
+#   ply_subareas, 
+#   r_10,
+#   field      = "subarea_id")
+  # fun        = "mean",
+  # background = 0,
+  # touches    = T)
+
+p_ch <- ply_crithab |> 
+    mutate(one = 1)
+r_ch <- terra::rasterize(
+  p_ch, 
+  r_10,
+  field      = "one",
+  # fun        = "mean",
+  # background = 0,
+  touches    = T)
+
+mapView(h_w_n, zcol = "n_per_1000km2") +
+  mapView(p_ch, zcol = "one") +
+  mapView(ply_subareas, zcol = "subarea_id") +
+  mapView(r_w, zcol = "n_per_1000km2") +
+  mapView(r_s, zcol = "subarea_id") +
+  mapView(r_ch, zcol = "subarea_id")
+
+r_h <- terra::rasterize(
+  h_whales |> 
+    slice(1:3), 
+  r_10, touches=T, cover = T, by = "hex_id")
+
+r_h[["136253"]] |> 
+  trim() |> 
+  mapView() +
+  mapView(h_whales |> slice(1))
+values(r_h[["136253"]])
+
+
+global(r_h[["136253"]], "sum", na.rm = T)
+terra::colSums()
+r_h[[1]] |> 
+  trim()
+
+plot(r_b)
+
+terra::zonal()
+
+r_10 <- r_10 |> 
+  mask()
+terra::()
+
+mapView(r_10)+
+  mapView(b_w)
+
+terra::as.polygons()
+
+
 
 # r_tif <- here("data/rasters.tif")
 # r <- rast(r_tif)
@@ -406,7 +640,7 @@ r_w <- d_cell_n |>
     sf_use_s2(T)
 ```
 
-```{r co_cell}
+```{r company_cell}
 d_company <- tbl(con, "company") |> 
   collect()
 
@@ -417,12 +651,9 @@ tbl(con, "cell") |>
   left_join(
     tbl(con, "ship_cell"),
     by = c("cell_ll_lon", "cell_ll_lat")) |>
-
 ```
-  
 
-```{r}
-#| label: summarize
+```{r old_ship_cell_sum}
 
 vesselpresence_bq <- "benioff-ocean-initiative.gulf_of_mexico_2023.vessel_presence_bymmsi_10_v1"
 
@@ -543,7 +774,8 @@ plot(combined_raster, col=viridis(100))
 message("Done! Results saved as 'speed_binned_distances.tif'")
 ```
 
-You can add options to executable code like this
+
+## Disconnect from DuckDB
 
 ```{r db_disconnect}
 # Disconnect from DuckDB
