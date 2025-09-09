@@ -28,15 +28,23 @@ nmfs_gdb      <- "~/My Drive/projects/msens/data/raw/fisheries.noaa.gov/NMFS_ESA
 crithab_geo   <- here("data/nmfs_crit_hab.geojson")
 subareas_shp  <- glue("{dir_data}/raw/Rice's Whale Proposed Critical Habitat Sub-Areas/Rice\'s Whale Proposed Critical Habitat Sub-Areas.shp")
 subareas_geo  <- here("data/crithab_subareas.geojson")
-dir_tbl       <- glue("{dir_data}/raw/ships/gulf_of_mexico_2023/")
+dir_tbl       <- glue("{dir_data}/raw/ships/gulf_of_mexico_2023")
 companies_csv <- glue("{dir_tbl}/companies.csv")
-goa_db        <- glue("{dir_tbl}/goa.db")
-whales_geo  <- here("data/whales.geojson") # hex_id:  whale densities by hexagon
-whales_csv  <- here("data/whales.csv")
+gfw_db        <- "/Users/bbest/big-files_gdrive-unsync/gfw.duckdb" # global Global Fishing Watch: vessel_presence_bymmsi_10_v1
+goa_db        <- glue("{dir_tbl}/goa.duckdb")  # global -> gulf of america
+whales_geo    <- here("data/whales.geojson") # hex_id:  whale densities by hexagon
+whales_csv    <- here("data/whales.csv")
+goa_geo       <- here("data/goa.geojson")
 
 # Connect to DuckDB
-con <- dbConnect(duckdb(), dbdir = goa_db, read_only = F)
-load_spatial(con)
+con_gfw <- dbConnect(duckdb(), dbdir = gfw_db, read_only = F)
+con_goa <- dbConnect(duckdb(), dbdir = goa_db, read_only = F)
+load_spatial(con_gfw)
+load_spatial(con_goa)
+
+# dbListTables(con_gfw)
+# dbListTables(con_goa)
+
 ```
 
 ## Read Whale Density Hexagons
@@ -318,22 +326,61 @@ TODO:
 #| eval: false
 
 # Load Parquet files into DuckDB
-dbExecute(con, glue(
+dbExecute(con_gfw, glue(
   "CREATE TABLE ship_cell AS SELECT * FROM read_parquet('{dir_tbl}/vessel_presence_bymmsi_10_v1/*.parquet')") )
 # nrows: 897,525,872
 
-dbExecute(con, glue(
+# dbExecute(con_gfw, "DROP TABLE cell")
+
+# generate table cell from unique cell_ll_lon, cell_ll_lat and store permanently
+tbl(con_gfw, "ship_cell") |> 
+  distinct(cell_ll_lon, cell_ll_lat) |> 
+  arrange(cell_ll_lon, cell_ll_lat) |> 
+  mutate(cell_id = row_number()) |>
+  compute("cell", temporary = F)
+
+dbExecute(con_gfw, glue(
+  "ALTER TABLE ship_cell ADD COLUMN cell_id INTEGER"))
+# update ship_cell with cell_id based on matching cell_ll_lon and cell_ll_lat
+dbExecute(con_gfw, glue(
+  "UPDATE ship_cell AS sc
+   SET cell_id = c.cell_id
+   FROM cell AS c
+   WHERE
+     sc.cell_ll_lon = c.cell_ll_lon AND
+     sc.cell_ll_lat = c.cell_ll_lat"))
+
+# confirm min diff is 1/10th degree
+# v <- tbl(con_gfw, "cell") |> 
+#   filter(cell_ll_lon == -180) |> 
+#   distinct(cell_ll_lat) |>
+#   arrange(cell_ll_lat) |> 
+#   pull(cell_ll_lat)
+# range(diff(v))
+# 0.1 14.7
+
+# update table cell with geometry based on the lower-left longitude (cell_ll_lon) and latitude (cell_ll_lat)
+dbExecute(con_gfw, glue(
+  "ALTER TABLE cell ADD COLUMN geom GEOMETRY"))
+dbExecute(con_gfw, glue(
+  "UPDATE cell SET geom = ST_MakeEnvelope(
+    cell_ll_lon, 
+    cell_ll_lat, 
+    cell_ll_lon + 0.1, 
+    cell_ll_lat + 0.1)"))
+
+dbExecute(con_gfw, glue(
   "CREATE TABLE ship AS SELECT * FROM read_parquet('{dir_tbl}/ihs_data_all/*.parquet')") )
 # nrows:     236,134
 
 # Load Parquet files into DuckDB
-dbExecute(con, glue(
+dbExecute(con_gfw, glue(
   "CREATE OR REPLACE TABLE company AS SELECT * FROM read_csv('{companies_csv}')") )
 # nrows:          16
 
 # Query the data
-# tbl(con, "ship_cell")
-# tbl(con, "ship")
+# tbl(con_gfw, "ship_cell")
+# tbl(con_gfw, "ship")
 #    imo_lr_ihs_no      mmsi name_of_ship         callsign ship_type group_owner technical_manager shipmanager registered_owner operator
 #            <int>     <int> <chr>                <chr>    <chr>     <chr>       <chr>             <chr>       <chr>            <chr>   
 #  1       8352526 244184361 TENACIOUS            PH9945   Towing/P… CFT         CFT               CFT         CFT              CFT     
@@ -350,7 +397,7 @@ dbExecute(con, glue(
 # # ℹ 7 more variables: operator_code <int>, registered_owner_code <int>, chartered_from <chr>, source_table <chr>,
 # #   updated_date <date>, length_m <dbl>, weight_gt <int>
 
-tbl(con, "ship") |> 
+tbl(con_gfw, "ship") |> 
   group_by(mmsi) |> 
   summarize(
     n = n()) |> 
@@ -363,7 +410,7 @@ tbl(con, "ship") |>
 #  1 305293000    27
 #  2 636015872    27
 #  3 538002591    27
-d_dupe1 <- tbl(con, "ship") |> 
+d_dupe1 <- tbl(con_gfw, "ship") |> 
   filter(mmsi == 305293000) |> 
   relocate(updated_date) |> 
   arrange(desc(updated_date)) |> 
@@ -371,7 +418,184 @@ d_dupe1 <- tbl(con, "ship") |>
 View(d_dupe1)
 ```
 
-```{r parquet_dates}
+## Gulf of America
+
+- [Marine Regions · Gulf of Mexico (IHO Sea Area)](https://www.marineregions.org/gazetteer.php?p=details&id=4288): `id=4288`
+
+```{r fig-goa}
+#| fig-cap: "Gulf of America + whale densities + 10 km buffer"
+
+librarian::shelf(mregions2)
+# sf_use_s2() # TRUE so buffer in meters
+
+gomex <- gaz_geometry(4288)
+
+p_whales <- h_whales |> 
+  st_union()
+
+p_goa <- st_union(gomex, p_whales) |> 
+  st_buffer(10000) # 10 km buffer
+
+write_sf(p_goa, goa_geo, delete_dsn = TRUE)
+
+(mapview(
+  p_goa, 
+  col.regions = "blue",
+  layer.name = "Gulf of Mexico + whale densities + 10 km buffer") +
+    mapview(
+      gomex, 
+      col.regions = "green",
+      layer.name = "Gulf of Mexico") +
+    mapView(
+      p_whales, 
+      col.regions = "red",
+      layer.name = "whale densities")) %>%
+  .@map |> 
+  addFullscreenControl()
+```
+
+### Subset Global Data to Gulf of America
+
+```{r subset_goa}
+p_goa <- read_sf(goa_geo)
+
+librarian::shelf(duckspatial)
+
+ddbs_write_vector(con_gfw, p_goa, "goa")
+
+# dbExecute(con_gfw, glue(
+#   "ALTER TABLE cell ADD COLUMN crs_duckspatial VARCHAR DEFAULT 'EPSG:4326'"))
+
+# Attach global database to the GOA database connection
+dbExecute(con_goa, glue("ATTACH '{gfw_db}' AS gfw"))
+# dbExecute(con_goa, glue("DETACH gfw;"))
+
+# Execute the spatial intersection query and create new table
+dbExecute(
+  con_goa, 
+  "CREATE TABLE cell AS
+    SELECT c.*
+    FROM gfw.cell c
+    JOIN gfw.goa g
+      ON ST_Intersects(c.geom, g.geometry)") # 13,950
+
+# Similarly write ship_cell to goa db based on cell.cell_id
+dbExecute(
+  con_goa, 
+  "CREATE TABLE ship_cell AS
+    SELECT sc.*
+    FROM gfw.ship_cell sc
+    JOIN cell c
+      ON sc.cell_id = c.cell_id")  # 13,838,148
+
+# cell.cell_id   -> ship_cell.cell_id
+# ship_cell.mmsi -> ship.mmsi
+# ship.operator  -> company.operator_lookup
+
+# Similarly write ship to goa db based on having ship_cell.mmsi
+dbExecute(
+  con_goa, 
+  "CREATE TABLE ship AS
+    SELECT s.*
+    FROM gfw.ship s
+    JOIN ship_cell sc
+      ON s.mmsi = sc.mmsi")  # 49,145,861
+
+# copy company to goa db
+dbExecute(
+  con_goa, 
+  "CREATE TABLE company AS
+    SELECT * FROM gfw.company")  # 16
+
+# copy goa to goa db for study area
+dbExecute(
+  con_goa, 
+  "CREATE TABLE goa AS
+    SELECT * FROM gfw.goa")  # 1
+
+dbExecute(con_goa, glue("DETACH gfw;"))
+# DBI::dbListTables(con_gfw)
+# DBI::dbListTables(con_goa)
+# [1] "cell"      "company"   "goa"       "ship"      "ship_cell"
+
+dbListFields(con_goa, "ship_cell")
+
+# retrieve and map the cells
+cell <- tbl(con_goa, "cell") |> 
+  mutate(geom_wkt = sql("ST_AsText(geom)")) |>
+  select(-geom) |> 
+  collect() |>
+  st_as_sf(wkt = "geom_wkt", crs = 4326)
+mapView(cell)
+
+# extract ship_cell within Gulf of America
+dbExecute(con_goa, glue(
+  "CREATE TABLE ship_cell AS
+    SELECT sc.*
+    FROM gfw.ship_cell sc
+    JOIN cell c
+      ON sc.cell_id = c.cell_id;"))
+
+dbListTables(con_goa)
+dbListTables(con_gfw)
+dbListFields(con_gfw, "goa")
+tbl(con_gfw, "goa") |> 
+  pull("crs_duckspatial") |> 
+  st_transform(3857) |> 
+  st_area() |> 
+  sum() |> 
+  set_units("km^2")
+
+# Subset global data to Gulf of America
+dbExecute(con_goa, glue(
+  "CREATE TABLE ship_cell AS 
+   SELECT * FROM read_parquet('{dir_tbl}/vessel_presence_bymmsi_10_v1/*.parquet')
+   WHERE
+     cell_ll_lon >= {st_bbox(goa_whales)[1]} AND
+     cell_ll_lat >= {st_bbox(goa_whales)[2]} AND
+     cell_ll_lon <= {st_bbox(goa_whales)[3]} AND
+     cell_ll_lat <= {st_bbox(goa_whales)[4]}") )
+```
+
+
+```{r}
+b <- st_bbox(h_whales) |> as.numeric()
+
+# [s]hip [c]ell date number of observations
+sc_date_n <- tbl(con, "ship_cell") |> 
+  filter(
+    cell_ll_lon >= !!b[1],
+    cell_ll_lat >= !!b[2],
+    cell_ll_lon <= !!b[3],
+    cell_ll_lat <= !!b[4]) |>
+  group_by(date) |> 
+  summarize(
+    n = n()) |> 
+  arrange(date) |> 
+  collect()
+# View(sc_date_n)
+# surprising:
+# - gaps in dates (59 days with data / 365 days)
+# - spikes in data with 3 orders of magnitude diff, 
+#   eg 2023-01-29 127,908 to 2023-01-31 123,249,963
+
+librarian::shelf(dygraphs)
+
+dygraph(sc_date_n, main = "Ship Presence in Gulf by Date") |> 
+  dySeries("n", label = "Number of Records") |> 
+  dyAxis("y", label = "Records") |> 
+  dyRangeSelector() |> 
+  dyOptions(
+    strokeWidth = 1, 
+    drawPoints  = T,
+    pointSize   = 2)
+```
+
+
+```{r fig-goa_dates}
+b <- st_bbox(h_whales) |> as.numeric()
+
+# [s]hip [c]ell date number of observations
 sc_date_n <- tbl(con, "ship_cell") |> 
   filter(
     cell_ll_lon >= !!b[1],
@@ -404,7 +628,7 @@ dygraph(sc_date_n, main = "Ship Presence in Gulf by Date") |>
 ```{r company_ships}
 librarian::shelf(stringr)
 
-d_c <- tbl(con, "company") |> 
+d_c <- tbl(con_gfw, "company") |> 
   collect()
 
 for (i in 1:nrow(d_c)){ # i = 1
@@ -561,8 +785,6 @@ terra::as.polygons()
 # r_tif <- here("data/rasters.tif")
 # r <- rast(r_tif)
 # names(r)
-
-b <- st_bbox(h_w) |> as.numeric()
 
 d_cell_n <- tbl(con, "ship_cell") |> 
   filter(
@@ -779,5 +1001,6 @@ message("Done! Results saved as 'speed_binned_distances.tif'")
 
 ```{r db_disconnect}
 # Disconnect from DuckDB
-dbDisconnect(con, shutdown = TRUE)
+dbDisconnect(con_gfw, shutdown = TRUE)
+dbDisconnect(con_goa, shutdown = TRUE)
 ```
