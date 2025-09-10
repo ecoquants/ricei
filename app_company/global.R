@@ -16,6 +16,7 @@ dir_private    <- ifelse(is_server, "/share/private", "~/My Drive/private")
 mapbox_tkn_txt <- glue("{dir_private}/mapbox_token_bdbest.txt")
 dir_data       <- "~/My Drive/projects/ricei/data"
 goa_db         <- glue("{dir_data}/raw/ships/gulf_of_mexico_2023/goa.duckdb")
+verbosity      <- interactive()
 
 # mapbox setup ----
 Sys.setenv(MAPBOX_ACCESS_TOKEN=readLines(mapbox_tkn_txt))

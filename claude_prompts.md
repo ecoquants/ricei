@@ -1,4 +1,54 @@
-## 2025-09-09 app_company creation
+## 2025-09-09.c debug with `verbose=interactive()` function arguments
+
+Ok, looking good! Except the app hangs on a duckdb query 0% and then crashes. 
+Add verbose flags to functions with default values set to boolean of 
+`interactive()` so when I interactively run the Shiny app in R, the Console 
+shows me which function and query is running (and hanging) for debugging
+
+⏺ I've added comprehensive verbose logging to all the functions in the Shiny app. Here's what I've done:
+
+  1. Added verbose = interactive() parameter to all functions - This will automatically enable debug messages when running
+  interactively in R
+  2. Added detailed logging messages that show:
+    - Function entry points with [function_name] prefix
+    - SQL queries being executed
+    - Query parameters (company filter, month range, speed range, etc.)
+    - Query execution time
+    - Number of rows returned
+    - Processing steps
+  3. Created a test script (test_db.R) that will help diagnose database connection issues:
+    - Checks if database file exists
+    - Tests basic connection
+    - Lists tables
+    - Tests spatial extension loading
+    - Runs simple queries on each table
+    - Tests the specific queries used by the app
+    - Tests join queries
+
+  To debug your hanging issue:
+
+  1. First run the test script to identify where the problem is:
+  source("app_company/test_db.R")
+  2. Then run the Shiny app and watch the console output:
+  shiny::runApp("app_company")
+
+  The verbose output will show you exactly:
+  - Which function is being called
+  - What query is being executed
+  - Where the app is hanging
+
+  Common issues that could cause hanging:
+  - Large query results (the verbose output shows row counts)
+  - Missing spatial extension
+  - Database file permissions
+  - Complex joins taking too long
+  - Missing indexes on join columns
+
+  The test script will help identify if it's a database connection issue, spatial extension issue, or query-specific problem. Once
+  you run it and see where it fails, we can address the specific issue.
+
+
+## 2025-09-09.b app_company creation
 
 Think deeply about creating a Shiny app (with separate `global.R`, `ui.R` and 
 `server.R` files) in folder `app_company` that allows users to explore and 
@@ -91,7 +141,7 @@ The app should have the following features using `bslib::navset_card_tab()` layo
   The app provides an interactive way to explore shipping patterns by company in the Gulf of America, with multiple visualization
   options and filtering capabilities.
 
-## 2025-09-09 prep
+## 2025-09-09.a prep
 
 ```r
 librarian::shelf(glue, here, rdocdump)

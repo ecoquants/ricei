@@ -635,31 +635,30 @@ for (i in 1:nrow(d_c)){ # i = 1
   company         <- d_c$company[i]
   operator_lookup <- d_c$operator_lookup[i]
   
-  message(company)
-  
+  # message(company)
+  # 
+  # d <- dbGetQuery(
+  #   con,
+  #   glue("
+  #        SELECT operator, operator_code FROM ship 
+  #        WHERE
+  #          operator ILIKE '%{company}%' ")) |> 
+  #   tibble()
+  # message(glue("  {company}: "), nrow(d))
+  # d |> table() |> print()
   d <- dbGetQuery(
-    con,
+    con_gfw,
     glue("
-         SELECT operator, operator_code FROM ship 
+         SELECT 
+           '{company}'         AS company, 
+           '{operator_lookup}' AS operator_lookup,
+           operator
+         FROM ship 
          WHERE
-           operator ILIKE '%{company}%'
-         ")) |> 
-    collect() |> 
+           operator ILIKE '%{operator_lookup}%' ")) |> 
     tibble()
-  message(glue("  {company}: "), nrow(d))
-  d |> table() |> print()
-  
-  d2 <- dbGetQuery(
-    con,
-    glue("
-         SELECT operator, operator_code FROM ship 
-         WHERE
-           operator ILIKE '%{operator_lookup}%'
-         ")) |> 
-    collect() |> 
-    tibble()
-  message(glue("  {operator_lookup}: "), nrow(d2),"\n")
-  d2 |> table() |> print()
+  # message(glue("  {operator_lookup}: "), nrow(d),"\n")
+  # d |> table() |> print()
 }
 
 #                                operator_code
