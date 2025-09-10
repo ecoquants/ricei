@@ -1,3 +1,86 @@
+## 2025-09-10.a optimize queries by folding in filtering and aggregation
+
+Separating the `filtered_data()` from `cell_metrics()` in @app_company/server.R
+makes logical sense, but the query runs way too slow since so many rows are
+getting returned from `filtered_data()`. Instead, fold `cell_metrics()` in 
+@app_company/server.R into `filtered_data()` (i.e., input of `input$weighting`, 
+`input$metric`) and therefore also into `filter_ship_data()` in 
+@app_company/functions.R. This way, the SQL query can do all the filtering and 
+aggregation in the database.
+
+Similarly update the `ships_summary()` and `time_series_data()` functions in
+@app_company/server.R and there corresponding functions `get_ships_summary()`
+and `create_time_series_data()` in @app_company/functions.R. This will reduce the
+amount of data being pulled from the database and speed up the app significantly.
+
+Also rename consistently all reactive functions in @app_company/server.R
+to be prefixed with `rx_` and apply the nav panel type (e.g., `rx_map_data()`, 
+and the corresponding functions in @app_company/functions.R to be prefixed with 
+`get_` (e.g., `get_map_data()`).
+
+⏺ Perfect! I've successfully refactored the Shiny app to optimize performance by:
+
+  Major Performance Improvements
+
+  1. Database-Level Aggregation
+
+  - Before: Pulled all raw ship_cell data into R, then aggregated in memory
+  - After: All aggregation happens in the database using SQL GROUP BY and aggregation functions
+  - Impact: Dramatically reduces data transfer and leverages database optimization
+
+  2. New Function Architecture
+
+  - get_map_data(): Aggregates metrics by cell directly in SQL
+  - get_ships_data(): Summarizes ships directly in SQL
+  - get_time_series_data(): Aggregates time series directly in SQL
+  - build_where_clause(): Shared filtering logic
+
+  3. Consistent Naming
+
+  - Reactive functions: rx_map_data(), rx_ships_data(), rx_time_series_data()
+  - Database functions: get_map_data(), get_ships_data(), get_time_series_data()
+
+  4. Smart SQL Generation
+
+  - Uses glue_sql() for safe parameter binding
+  - Conditional WHERE clauses (only adds filters when needed)
+  - Proper handling of company filtering with ILIKE and EXISTS subqueries
+  - Weighted averages calculated directly in SQL
+
+  5. Key Performance Benefits
+
+  Before (pulling all data):
+  -- Could return millions of rows
+  SELECT * FROM cell c
+  JOIN ship_cell sc ON c.cell_id = sc.cell_id
+  JOIN ship s ON sc.mmsi = s.mmsi
+  WHERE [filters]
+
+  After (aggregated results):
+  -- Returns only aggregated cells (~thousands of rows max)
+  SELECT c.cell_id, c.cell_ll_lon, c.cell_ll_lat,
+         ST_AsText(c.geom) AS geom_wkt,
+         SUM(sc.hours) AS metric_value
+  FROM cell c JOIN ship_cell sc ON c.cell_id = sc.cell_id
+  JOIN ship s ON sc.mmsi = s.mmsi
+  WHERE [filters]
+  GROUP BY c.cell_id, c.cell_ll_lon, c.cell_ll_lat, c.geom
+
+  6. Legacy Function Handling
+
+  - Old functions are marked as deprecated with helpful error messages
+  - Prevents accidental use of slow functions
+  - Clear migration path for any external code
+
+  The app should now be significantly faster because:
+  - Reduced data transfer: From millions of rows to thousands
+  - Database optimization: Leverages DuckDB's columnar storage and vectorized operations
+  - Parallel processing: Each reactive function runs independently
+  - Cached results: Shiny's reactive system caches results until inputs change
+
+  The verbose logging will show you exactly how much faster the queries run, and you should see query times drop from potentially
+  minutes to seconds or less.
+
 ## 2025-09-09.c debug with `verbose=interactive()` function arguments
 
 Ok, looking good! Except the app hangs on a duckdb query 0% and then crashes. 

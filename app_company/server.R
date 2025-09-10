@@ -15,75 +15,94 @@ function(input, output, session) {
     }
   })
   
-  # filtered data ----
-  filtered_data <- reactive({
-    req(input$company, input$months, input$speed)
+  # reactive data functions ----
+  
+  # map data reactive ----
+  rx_map_data <- reactive({
+    req(input$company, input$months, input$speed, input$metric)
     
-    withProgress(message = 'Loading data...', value = 0, {
+    weight_by <- if (!is.null(input$weighting)) input$weighting else "hours"
+    
+    withProgress(message = 'Loading map data...', value = 0, {
       setProgress(0.3, detail = "Querying database...")
       
-      # browser()
-      
-      data <- filter_ship_data(
+      data <- get_map_data(
         con            = con,
         company_filter = input$company,
         month_range    = if (setequal(input$months, month_range_init)) NULL else input$months,
-        speed_range    = if (setequal(input$speed,  speed_range_init)) NULL else input$speed,
-        selected_ships = selected_ships() )
+        speed_range    = if (setequal(input$speed, speed_range_init)) NULL else input$speed,
+        selected_ships = selected_ships(),
+        metric         = input$metric,
+        weight_by      = weight_by
+      )
       
       setProgress(1, detail = "Complete")
       data
     })
   })
   
-  # cell metrics for map ----
-  cell_metrics <- reactive({
-    req(filtered_data(), input$metric)
+  # ships data reactive ----
+  rx_ships_data <- reactive({
+    req(input$company, input$months, input$speed)
+    
+    withProgress(message = 'Loading ships data...', value = 0, {
+      setProgress(0.3, detail = "Querying database...")
+      
+      data <- get_ships_data(
+        con            = con,
+        company_filter = input$company,
+        month_range    = if (setequal(input$months, month_range_init)) NULL else input$months,
+        speed_range    = if (setequal(input$speed, speed_range_init)) NULL else input$speed,
+        selected_ships = selected_ships()
+      )
+      
+      setProgress(1, detail = "Complete")
+      data
+    })
+  })
+  
+  # time series data reactive ----
+  rx_time_series_data <- reactive({
+    req(input$company, input$months, input$speed, input$metric)
     
     weight_by <- if (!is.null(input$weighting)) input$weighting else "hours"
     
-    calculate_cell_metrics(
-      data      = filtered_data(),
-      metric    = input$metric,
-      weight_by = weight_by
-    )
+    withProgress(message = 'Loading time series data...', value = 0, {
+      setProgress(0.3, detail = "Querying database...")
+      
+      data <- get_time_series_data(
+        con            = con,
+        company_filter = input$company,
+        month_range    = if (setequal(input$months, month_range_init)) NULL else input$months,
+        speed_range    = if (setequal(input$speed, speed_range_init)) NULL else input$speed,
+        selected_ships = selected_ships(),
+        metric         = input$metric,
+        weight_by      = weight_by
+      )
+      
+      setProgress(1, detail = "Complete")
+      data
+    })
   })
   
-  # ships summary ----
-  ships_summary <- reactive({
-    req(filtered_data())
-    get_ships_summary(filtered_data())
-  })
-  
-  # time series data ----
-  time_series_data <- reactive({
-    req(filtered_data(), input$metric)
-    
-    weight_by <- if (!is.null(input$weighting)) input$weighting else "hours"
-    
-    create_time_series_data(
-      data      = filtered_data(),
-      metric    = input$metric,
-      weight_by = weight_by
-    )
-  })
+  # render outputs ----
   
   # render map ----
   output$map <- mapgl::renderMapboxgl({
-    req(cell_metrics())
+    req(rx_map_data())
     
     create_choropleth_map(
-      cell_sf     = cell_metrics(),
+      cell_sf     = rx_map_data(),
       metric_name = names(metric_options)[metric_options == input$metric]
     )
   })
   
   # render ships table ----
   output$ships_table <- DT::renderDataTable({
-    req(ships_summary())
+    req(rx_ships_data())
     
     DT::datatable(
-      ships_summary(),
+      rx_ships_data(),
       options = list(
         pageLength = 10,
         scrollX    = TRUE,
@@ -98,15 +117,25 @@ function(input, output, session) {
       ),
       rownames = FALSE,
       colnames = c(
-        'MMSI'            = 'mmsi',
-        'Ship Name'       = 'name_of_ship',
-        'Operator'        = 'operator',
-        'Records'         = 'n_records',
-        'First Seen'      = 'date_min',
-        'Last Seen'       = 'date_max'
+        'MMSI'       = 'mmsi',
+        'Ship Name'  = 'name_of_ship',
+        'Operator'   = 'operator',
+        'Records'    = 'n_records',
+        'First Seen' = 'date_min',
+        'Last Seen'  = 'date_max'
       )
     ) |>
       DT::formatDate(columns = c('date_min', 'date_max'), method = 'toLocaleDateString')
+  })
+  
+  # render time series ----
+  output$time_series <- dygraphs::renderDygraph({
+    req(rx_time_series_data())
+    
+    create_time_series_plot(
+      ts_data     = rx_time_series_data(),
+      metric_name = names(metric_options)[metric_options == input$metric]
+    )
   })
   
   # handle ship selection ----
@@ -114,7 +143,7 @@ function(input, output, session) {
     selected_rows <- input$ships_table_rows_selected
     
     if (length(selected_rows) > 0) {
-      ships_data <- ships_summary()
+      ships_data <- rx_ships_data()
       selected_mmsi <- ships_data$mmsi[selected_rows]
       selected_ships(selected_mmsi)
     } else {
@@ -127,7 +156,7 @@ function(input, output, session) {
     if (is.null(selected_ships())) {
       "All ships shown"
     } else {
-      total_ships <- nrow(ships_summary())
+      total_ships <- nrow(rx_ships_data())
       selected_count <- length(selected_ships())
       paste("Ships subset:", selected_count, "of", total_ships)
     }
@@ -145,16 +174,6 @@ function(input, output, session) {
     # clear table selection
     DT::dataTableProxy("ships_table") |>
       DT::selectRows(NULL)
-  })
-  
-  # render time series ----
-  output$time_series <- dygraphs::renderDygraph({
-    req(time_series_data())
-    
-    create_time_series_plot(
-      ts_data     = time_series_data(),
-      metric_name = names(metric_options)[metric_options == input$metric]
-    )
   })
   
   # update map when switching tabs (ensure proper rendering) ----
