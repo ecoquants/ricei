@@ -43,10 +43,9 @@ get_month_range <- function(con, verbose = interactive()) {
   dates <- DBI::dbGetQuery(con, query)
   if (verbose) message("[get_month_range] Date range: ", dates$min_date, " to ", dates$max_date)
   
-  list(
+  c(
     min = lubridate::month(dates$min_date),
-    max = lubridate::month(dates$max_date)
-  )
+    max = lubridate::month(dates$max_date))
 }
 
 #' Get speed range from ship_cell data
@@ -59,47 +58,99 @@ get_speed_range <- function(con, verbose = interactive()) {
   speeds <- DBI::dbGetQuery(con, query)
   if (verbose) message("[get_speed_range] Speed range: ", speeds$min_speed, " to ", speeds$max_speed, " knots")
   
-  c(min = speeds$min_speed, max = speeds$max_speed)
+  c(
+    min = speeds$min_speed, 
+    max = speeds$max_speed)
 }
 
 # data processing functions ----
 
-#' Filter ship data based on user inputs
-#' @param con Database connection
-#' @param company_filter Selected company filter
-#' @param month_range Selected month range (numeric 1-12)
-#' @param speed_range Selected speed range
-#' @param selected_ships Optional vector of selected ship MMSIs
-#' @param verbose Show debug messages
-#' @return Filtered data
+#' Filter ship data based on user inputs (DuckDB + glue_sql, ILIKE semantics)
+#' @param con DBI connection (DuckDB)
+#' @param company_filter One of "All", "All Companies", "Other Companies", or a specific company name
+#' @param month_range length-2 numeric (1-12). Omit/NULL or c(1,12) => no month filter
+#' @param speed_range length-2 numeric. Omit/NULL => no speed filter
+#' @param selected_ships optional numeric/character vector of MMSIs. Omit/empty => no ship filter
+#' @param verbose logical
+#' @return data.frame (tibble) of filtered rows
 filter_ship_data <- function(
-    con, company_filter, month_range, speed_range, 
-    selected_ships = NULL, verbose = interactive()) {
+    con,
+    company_filter = NULL,
+    month_range    = NULL,
+    speed_range    = NULL,
+    selected_ships = NULL,
+    verbose        = interactive()
+) {
   
-  # build company filter SQL
-  company_sql <- if (company_filter == "All") {
-    "1=1"  # no filter
-  } else if (company_filter == "All Companies") {
-    "s.operator IN (SELECT operator_lookup FROM company)"
-  } else if (company_filter == "Other Companies") {
-    "s.operator NOT IN (SELECT operator_lookup FROM company)"
-  } else {
-    glue::glue_sql("s.operator IN (
-      SELECT operator_lookup FROM company WHERE company = {company_filter}
-    )", .con = con)
+  # ---- Company clause (ILIKE via EXISTS) ----
+  company_clause <- switch(
+    company_filter,
+    "All" = NULL,  # no company restriction
+    "All Companies" =
+      # Any ship whose operator ILIKE any operator_lookup in company table
+      "EXISTS (SELECT 1
+               FROM company c2
+               WHERE s.operator ILIKE '%' || c2.operator_lookup || '%')",
+    "Other Companies" =
+      # Ship operators that do NOT ILIKE any operator_lookup in company table
+      "NOT EXISTS (SELECT 1
+                   FROM company c2
+                   WHERE s.operator ILIKE '%' || c2.operator_lookup || '%')",
+    {
+      # Specific company: ILIKE any operator_lookup belonging to that company
+      glue::glue_sql(
+        "EXISTS (SELECT 1
+                 FROM company c2
+                 WHERE c2.company = {company_filter}
+                   AND s.operator ILIKE '%' || c2.operator_lookup || '%')",
+        .con = con
+      )
+    }
+  )
+  
+  # ---- Month clause (only if not full range 1..12 and provided) ----
+  month_clause <- NULL
+  if (!is.null(month_range) && length(month_range) == 2) {
+    # Only add if not the full 1..12
+    if (!(identical(month_range, c(1, 12)))) {
+      month_clause <- glue::glue_sql(
+        "EXTRACT(MONTH FROM sc.date) BETWEEN {month_range[1]} AND {month_range[2]}",
+        .con = con
+      )
+    }
   }
   
-  # build ship filter SQL if ships are selected
-  ship_sql <- if (!is.null(selected_ships) && length(selected_ships) > 0) {
-    mmsi_list <- paste(selected_ships, collapse = ",")
-    glue::glue("AND sc.mmsi IN ({mmsi_list})")
-  } else {
-    ""
+  # ---- Speed clause (only if provided) ----
+  speed_clause <- NULL
+  if (!is.null(speed_range) && length(speed_range) == 2) {
+    speed_clause <- glue::glue_sql(
+      "sc.avg_speed_knots BETWEEN {speed_range[1]} AND {speed_range[2]}",
+      .con = con
+    )
   }
   
-  # main query
-  query <- glue::glue("
-    SELECT 
+  # ---- Ship MMSI clause (only if provided and non-empty) ----
+  ship_clause <- NULL
+  if (!is.null(selected_ships) && length(selected_ships) > 0) {
+    ship_clause <- glue::glue_sql(
+      "sc.mmsi IN ({vals*})",
+      vals = selected_ships,
+      .con = con
+    )
+  }
+  
+  # ---- Assemble WHERE predicates (only those that exist) ----
+  predicates <- Filter(Negate(is.null), list(company_clause, month_clause, speed_clause, ship_clause))
+  
+  where_sql <- if (length(predicates)) {
+    DBI::SQL(paste0("WHERE ", paste(predicates, collapse = " AND ")))
+  } else {
+    DBI::SQL("") # no WHERE
+  }
+  
+  # ---- Main query (use glue_sql for identifiers & safety) ----
+  query <- glue::glue_sql("
+    SELECT
       c.cell_id,
       c.cell_ll_lon,
       c.cell_ll_lat,
@@ -110,36 +161,40 @@ filter_ship_data <- function(
       sc.avg_speed_knots,
       s.name_of_ship,
       s.operator,
-      ST_AsText(c.geom) as geom_wkt
+      ST_AsText(c.geom) AS geom_wkt
     FROM cell c
     JOIN ship_cell sc ON c.cell_id = sc.cell_id
-    JOIN ship s ON sc.mmsi = s.mmsi
-    WHERE {company_sql}
-      AND EXTRACT(MONTH FROM sc.date) BETWEEN {month_range[1]} AND {month_range[2]}
-      AND sc.avg_speed_knots BETWEEN {speed_range[1]} AND {speed_range[2]}
-      {ship_sql}
-  ")
+    JOIN ship s      ON sc.mmsi   = s.mmsi
+    {where_sql}
+  ", .con = con)
   
   if (verbose) {
     message("[filter_ship_data] Running main query:")
     message("  Company filter: ", company_filter)
-    message("  Month range: ", month_range[1], "-", month_range[2])
-    message("  Speed range: ", speed_range[1], "-", speed_range[2], " knots")
-    message("  Selected ships: ", ifelse(is.null(selected_ships), "None", length(selected_ships)))
-    message("  Query preview: ", substr(query, 1, 200), "...")
+    if (!is.null(month_range)) message("  Month range: ",
+                                       if (identical(month_range, c(1,12))) "All months"
+                                       else paste0(month_range[1], "-", month_range[2]))
+    if (!is.null(speed_range)) message("  Speed range: ",
+                                       paste(speed_range, collapse = " - "), " knots")
+    message("  Selected ships: ",
+            if (is.null(selected_ships)) "None" else length(selected_ships))
+    message("  Query preview: ", substr(as.character(query), 1, 200), "...")
   }
   
-  start_time <- Sys.time()
+  # browser()
+  
+  t0 <- Sys.time()
   result <- DBI::dbGetQuery(con, query)
-  query_time <- Sys.time() - start_time
+  dt <- Sys.time() - t0
   
   if (verbose) {
-    message("[filter_ship_data] Query completed in ", round(query_time, 2), " ", units(query_time))
+    message("[filter_ship_data] Query completed in ", round(dt, 2), " ", units(dt))
     message("[filter_ship_data] Returned ", nrow(result), " rows")
   }
   
-  result
+  tibble::as_tibble(result)
 }
+
 
 #' Calculate metrics by cell for choropleth map
 #' @param data Filtered ship data

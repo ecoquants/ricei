@@ -22,7 +22,7 @@ page_sidebar(
       "Months:",
       min   = 1,
       max   = 12,
-      value = c(month_range$min, month_range$max),
+      value = month_range_init,
       step  = 1,
       ticks = FALSE
     ),
@@ -35,9 +35,9 @@ page_sidebar(
     sliderInput(
       "speed",
       "Speed (knots):",
-      min   = floor(speed_range["min"]),
-      max   = ceiling(speed_range["max"]),
-      value = c(speed_range["min"], speed_range["max"]),
+      min   = speed_range_init[1],
+      max   = speed_range_init[2],
+      value = speed_range_init,
       step  = 0.5
     ),
     

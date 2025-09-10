@@ -26,9 +26,9 @@ librarian::shelf(mapgl)
 con <- connect_to_db(goa_db)
 
 # get initial choices for UI ----
-company_choices <- get_company_choices(con)
-month_range     <- get_month_range(con)
-speed_range     <- get_speed_range(con)
+company_choices  <- get_company_choices(con)
+month_range_init <- get_month_range(con)
+speed_range_init <- get_speed_range(con)
 
 # metric options ----
 metric_options <- c(

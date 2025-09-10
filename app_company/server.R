@@ -22,13 +22,14 @@ function(input, output, session) {
     withProgress(message = 'Loading data...', value = 0, {
       setProgress(0.3, detail = "Querying database...")
       
+      # browser()
+      
       data <- filter_ship_data(
         con            = con,
         company_filter = input$company,
-        month_range    = input$months,
-        speed_range    = input$speed,
-        selected_ships = selected_ships()
-      )
+        month_range    = if (setequal(input$months, month_range_init)) NULL else input$months,
+        speed_range    = if (setequal(input$speed,  speed_range_init)) NULL else input$speed,
+        selected_ships = selected_ships() )
       
       setProgress(1, detail = "Complete")
       data
