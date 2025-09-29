@@ -14,9 +14,15 @@ source("functions.R")
 is_server      <-  Sys.info()[["sysname"]] == "Linux"
 dir_private    <- ifelse(is_server, "/share/private", "~/My Drive/private")
 mapbox_tkn_txt <- glue("{dir_private}/mapbox_token_bdbest.txt")
-dir_data       <- "~/My Drive/projects/ricei/data"
+dir_data       <- ifelse(is_server, "/share/data/ricei", "~/My Drive/projects/ricei/data")
 goa_db         <- glue("{dir_data}/raw/ships/gulf_of_mexico_2023/goa.duckdb")
 verbosity      <- interactive()
+files_required <- c(
+  mapbox_tkn_txt,
+  goa_db)
+
+# check required files ----
+stopifnot(all(file.exists(files_required)))
 
 # mapbox setup ----
 Sys.setenv(MAPBOX_ACCESS_TOKEN=readLines(mapbox_tkn_txt))
