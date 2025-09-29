@@ -488,18 +488,109 @@ dbExecute(
     JOIN cell c
       ON sc.cell_id = c.cell_id")  # 13,838,148
 
+# convert ship_cell.mmsi to integer, so matches ship.mmsi
+dbExecute(con_goa, glue(
+  "ALTER TABLE ship_cell 
+   ALTER COLUMN mmsi SET DATA TYPE INTEGER USING mmsi::INTEGER"))
+
+# DB Relationships (one-to-many) ----
 # cell.cell_id   -> ship_cell.cell_id
 # ship_cell.mmsi -> ship.mmsi
 # ship.operator  -> company.operator_lookup
 
-# Similarly write ship to goa db based on having ship_cell.mmsi
+# tbl(con_goa, "ship") |> count() |> collect()                        # 49,145,861: all
+# tbl(con_goa, "ship_cell") |> distinct(mmsi) |> count() |> collect() #     10,542: goa distinct
+# dbGetQuery(con_goa, "
+#   SELECT COUNT(*) AS n
+#   FROM (
+#     SELECT DISTINCT mmsi
+#     FROM gfw.ship_cell)")                                           #    713,985: all distinct
+
+tbl(con_gfw, "ship") |> 
+  filter(mmsi %in% (tbl(con_goa, "ship_cell") |> distinct(mmsi) |> pull())) |>
+  arrange(mmsi, updated_date, source_table) |>
+  tibble::rowid_to_column("ship_id") |>
+  count() |> 
+  collect() #     10,542: goa distinct
+
 dbExecute(
   con_goa, 
-  "CREATE TABLE ship AS
+  "CREATE OR REPLACE TABLE ship AS
     SELECT s.*
     FROM gfw.ship s
-    JOIN ship_cell sc
-      ON s.mmsi = sc.mmsi")  # 49,145,861
+    WHERE
+      s.mmsi IN (SELECT DISTINCT mmsi FROM ship_cell)")               #     32,838: goa
+# ship records: gfw -> goa
+# 49,145,861: gfw
+#    713,985: gfw distinct
+#     32,838: goa
+#     10,542: goa distinct
+
+# get ship rows with duplicate mmsi, sort by most recent updated_date
+# d_dupe2 <- tbl(con_goa, "ship") |> 
+#   group_by(mmsi) |> 
+#   summarize(
+#     n = n(),
+#     updated_date = max(updated_date, na.rm = T)) |> 
+#   filter(n > 1) |> 
+#   arrange(desc(n)) |> 
+#   collect()
+# d_dupe2 |> 
+#   View()
+# 
+# d_dupe2_top <- tbl(con_goa, "ship") |> 
+#   filter(mmsi == 636015872) |> 
+#   relocate(mmsi, updated_date, source_table) |>
+#   arrange(updated_date) |> 
+#   collect()
+# View(d_dupe2_top)
+
+# update field ship.ship_id as unique incrementing integer based on sorting by mmsi, updated_date, source_table
+dbExecute(con_goa, glue(
+  "ALTER TABLE ship ADD COLUMN ship_id INTEGER"))
+dbExecute(con_goa, "
+  UPDATE ship 
+  SET ship_id = (
+    SELECT row_number() OVER (
+      ORDER BY mmsi, updated_date, source_table )
+    FROM ship s2 
+    WHERE s2.rowid = ship.rowid)")
+tbl(con_goa, "ship") |> pull(rowid)
+
+dbExecute(con_goa, glue(
+  "UPDATE ship SET ship_id = ROW_NUMBER() OVER ()"))
+  
+dbExecute(con_goa, glue(
+  "UPDATE ship SET ship_id = sub.ship_id
+   FROM (
+     SELECT 
+       ship_id,
+       mmsi,
+       updated_date,
+       source_table
+     FROM (
+       SELECT 
+         ROW_NUMBER() OVER (ORDER BY mmsi, updated_date, source_table) AS ship_id,
+         mmsi,
+         updated_date,
+         source_table
+       FROM ship
+     ) AS ordered_ships
+   ) AS sub
+   WHERE 
+     ship.mmsi = sub.mmsi AND
+     ship.updated_date = sub.updated_date AND
+     ship.source_table = sub.source_table"))
+# tbl(con_goa, "ship") |> 
+#   pull(ship_id) |> 
+#   duplicated() |> 
+#   sum()
+#   
+#   filter(mmsi == 636015872) |> 
+#   arrange(ship_id) |> 
+#   relocate(ship_id, mmsi, updated_date, source_table) |> 
+#   collect() |> 
+#   View()
 
 # copy company to goa db
 dbExecute(
@@ -558,7 +649,7 @@ dbExecute(con_goa, glue(
 ```
 
 
-```{r}
+```{r fig-time_series}
 b <- st_bbox(h_whales) |> as.numeric()
 
 # [s]hip [c]ell date number of observations

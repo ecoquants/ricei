@@ -1,11 +1,9 @@
-# server.R - Server logic for Gulf of America shipping app
-
 function(input, output, session) {
   
-  # reactive values ----
+  # selected_ships (reactive values) ----
   selected_ships <- reactiveVal(NULL)
   
-  # month labels output ----
+  # month_labels ----
   output$month_labels <- renderText({
     month_nums <- input$months
     if (length(month_nums) == 2) {
@@ -15,17 +13,22 @@ function(input, output, session) {
     }
   })
   
-  # reactive data functions ----
+  # reactive data functions
   
-  # map data reactive ----
+  # rx_map_data ----
   rx_map_data <- reactive({
     req(input$company, input$months, input$speed, input$metric)
-    
+
+    if (interactive()) {
+      message("[rx_map_data] Triggered with selected_ships: ",
+              ifelse(is.null(selected_ships()), "NULL", paste(selected_ships(), collapse = ", ")))
+    }
+
     weight_by <- if (!is.null(input$weighting)) input$weighting else "hours"
-    
+
     withProgress(message = 'Loading map data...', value = 0, {
       setProgress(0.3, detail = "Querying database...")
-      
+
       data <- get_map_data(
         con            = con,
         company_filter = input$company,
@@ -35,41 +38,47 @@ function(input, output, session) {
         metric         = input$metric,
         weight_by      = weight_by
       )
-      
+
       setProgress(1, detail = "Complete")
       data
     })
   })
   
-  # ships data reactive ----
+  # rx_ships_data ----
   rx_ships_data <- reactive({
     req(input$company, input$months, input$speed)
-    
+
+    # don't include selected_ships in the reactive dependency
+    # to prevent re-querying when selection changes
     withProgress(message = 'Loading ships data...', value = 0, {
       setProgress(0.3, detail = "Querying database...")
-      
+
       data <- get_ships_data(
         con            = con,
         company_filter = input$company,
         month_range    = if (setequal(input$months, month_range_init)) NULL else input$months,
         speed_range    = if (setequal(input$speed, speed_range_init)) NULL else input$speed,
-        selected_ships = selected_ships()
-      )
-      
+        selected_ships = NULL )  # always show all ships in the table
+
       setProgress(1, detail = "Complete")
       data
     })
   })
   
-  # time series data reactive ----
+  # rx_time_series_data ----
   rx_time_series_data <- reactive({
     req(input$company, input$months, input$speed, input$metric)
-    
+
+    if (interactive()) {
+      message("[rx_time_series_data] Triggered with selected_ships: ",
+              ifelse(is.null(selected_ships()), "NULL", paste(selected_ships(), collapse = ", ")))
+    }
+
     weight_by <- if (!is.null(input$weighting)) input$weighting else "hours"
-    
+
     withProgress(message = 'Loading time series data...', value = 0, {
       setProgress(0.3, detail = "Querying database...")
-      
+
       data <- get_time_series_data(
         con            = con,
         company_filter = input$company,
@@ -79,56 +88,54 @@ function(input, output, session) {
         metric         = input$metric,
         weight_by      = weight_by
       )
-      
+
       setProgress(1, detail = "Complete")
       data
     })
   })
   
-  # render outputs ----
+  # render outputs
   
-  # render map ----
+  # map ----
   output$map <- mapgl::renderMapboxgl({
-    req(rx_map_data())
+    req(input$tgl_dark, rx_map_data())
     
     create_choropleth_map(
       cell_sf     = rx_map_data(),
-      metric_name = names(metric_options)[metric_options == input$metric]
-    )
+      metric_name = names(metric_options)[metric_options == input$metric],
+      dark_mode   = input$tgl_dark == "dark")
   })
   
-  # render ships table ----
+  # ships_table ----
   output$ships_table <- DT::renderDataTable({
     req(rx_ships_data())
     
+    data <- rx_ships_data()
+    
     DT::datatable(
-      rx_ships_data(),
-      options = list(
+      data,
+      rownames = F,
+      options  = list(
+        lengthMenu = list(c(5, 10, 25, 50, -1), c('5', '10', '25', '50', 'All')),
         pageLength = 10,
-        scrollX    = TRUE,
-        order      = list(list(3, 'desc')),  # sort by n_records descending
-        columnDefs = list(
-          list(targets = 0, visible = FALSE)  # hide mmsi column
-        )
-      ),
+        scrollX    = T,
+        order      = list(list(3, 'desc')) ),  # sort by n_records descending
       selection = list(
         mode   = 'multiple',
-        target = 'row'
-      ),
-      rownames = FALSE,
+        target = 'row'),
       colnames = c(
         'MMSI'       = 'mmsi',
         'Ship Name'  = 'name_of_ship',
         'Operator'   = 'operator',
         'Records'    = 'n_records',
         'First Seen' = 'date_min',
-        'Last Seen'  = 'date_max'
-      )
-    ) |>
-      DT::formatDate(columns = c('date_min', 'date_max'), method = 'toLocaleDateString')
+        'Last Seen'  = 'date_max')) |>
+      DT::formatDate(
+        columns = c('First Seen', 'Last Seen'), 
+        method = 'toLocaleDateString')
   })
   
-  # render time series ----
+  # time_series ----
   output$time_series <- dygraphs::renderDygraph({
     req(rx_time_series_data())
     
@@ -138,31 +145,51 @@ function(input, output, session) {
     )
   })
   
-  # handle ship selection ----
+  # observe ship selection ----
   observe({
     selected_rows <- input$ships_table_rows_selected
-    
+
+    if (interactive()) {
+      message("[observe ship selection] Selected rows: ",
+              ifelse(is.null(selected_rows), "NULL", paste(selected_rows, collapse = ", ")))
+    }
+
     if (length(selected_rows) > 0) {
       ships_data <- rx_ships_data()
       selected_mmsi <- ships_data$mmsi[selected_rows]
+
+      if (interactive()) {
+        message("[observe ship selection] Selected MMSIs: ", paste(selected_mmsi, collapse = ", "))
+      }
+
       selected_ships(selected_mmsi)
     } else {
+      if (interactive()) {
+        message("[observe ship selection] Clearing selection")
+      }
       selected_ships(NULL)
     }
   })
   
-  # ship subset text ----
+  # ship_subset_text ----
   output$ship_subset_text <- renderText({
-    if (is.null(selected_ships())) {
-      "All ships shown"
+    current_selection <- selected_ships()
+
+    if (interactive()) {
+      message("[ship_subset_text] Current selection: ",
+              ifelse(is.null(current_selection), "NULL", paste(current_selection, collapse = ", ")))
+    }
+
+    total_ships <- nrow(rx_ships_data()) |> format(big.mark = ",")
+    if (is.null(current_selection)) {
+      paste("Ships: all of", total_ships)
     } else {
-      total_ships <- nrow(rx_ships_data())
-      selected_count <- length(selected_ships())
-      paste("Ships subset:", selected_count, "of", total_ships)
+      selected_count <- length(current_selection) |> format(big.mark = ",")
+      paste("Ships:", selected_count, "of", total_ships)
     }
   })
   
-  # has ship selection (for conditional panel) ----
+  # has_ship_selection (for conditional panel) ----
   output$has_ship_selection <- reactive({
     !is.null(selected_ships())
   })
@@ -170,6 +197,10 @@ function(input, output, session) {
   
   # reset ship selection ----
   observeEvent(input$reset_ships, {
+    if (interactive()) {
+      message("[reset_ships] Reset button clicked")
+    }
+
     selected_ships(NULL)
     # clear table selection
     DT::dataTableProxy("ships_table") |>

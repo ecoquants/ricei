@@ -2,9 +2,9 @@
 
 # load libraries ----
 librarian::shelf(
-  bslib, DBI, DT, duckdb, duckdbfs, dplyr, dygraphs, glue, here, leaflet, 
+  bsicons, bslib, DBI, DT, duckdb, duckdbfs, dplyr, dygraphs, glue, here, leaflet, 
   lubridate, # mapgl after setting mapbox token
-  sf, shiny, xts, 
+  sf, shiny, xts, viridisLite,
   quiet = T)
 
 # source helper functions ----
@@ -32,18 +32,28 @@ speed_range_init <- get_speed_range(con)
 
 # metric options ----
 metric_options <- c(
-  "Average Speed" = "avg speed",
-  "Minimum Speed" = "min speed",
-  "Maximum Speed" = "max speed",
-  "Kilometers Traveled" = "km traveled",
-  "Hours Traveled" = "hrs traveled",
-  "Number of Unique Ships" = "# unique ships",
+  "Average Speed"               = "avg speed",
+  "Minimum Speed"               = "min speed",
+  "Maximum Speed"               = "max speed",
+  "Kilometers Traveled"         = "km traveled",
+  "Hours Traveled"              = "hrs traveled",
+  "Number of Unique Ships"      = "# unique ships",
   "Number of Ship-Cell Records" = "# ship-cell records")
 
 # weighting options ----
 weight_options <- c(
-  "Hours" = "hours",
+  "Hours"      = "hours",
   "Kilometers" = "kilometers")
+
+# ply_cells ----
+# get spatial cells once, so construct geom once
+ply_cells <- tbl(con, "cell") |> 
+  mutate(
+    geom_wkt = sql("ST_AsText(geom)")) |> 
+  select(cell_id, cell_ll_lon, cell_ll_lat, geom_wkt) |>
+  collect() |> 
+  st_as_sf(wkt = "geom_wkt", crs = 4326) |> 
+  st_set_geometry("geom")
 
 # cleanup on app stop ----
 onStop(function() {

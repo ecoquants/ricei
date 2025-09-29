@@ -1,3 +1,43 @@
+## 2025-09-26.a fix ship selection
+
+```bash
+cd /Users/bbest/Github/ecoquants/ricei
+claude
+```
+
+Something is amiss with the Shiny app's reactivity for ship selection in
+@app_company/server.R. When I select a ship (e.g. mmsi = 367703000, the first in 
+the Ships panel datatable) the selection flickers and then returns to all ships. 
+Here's the diagnostic output in the Console when trying to select a ship:
+
+```
+[get_ships_data] Query completed in 0.01 secs
+[get_ships_data] Found 1 unique ships
+[get_ships_data] Running ship summary query
+[get_ships_data] Query completed in 0.37 secs
+[get_ships_data] Found 6495 unique ships
+```
+
+Try to fix the problem and meanwhile add more diagnostic information to the
+reactive functions for debugging.
+
+⏺ Fixed the issue and added diagnostic logging
+
+  The problem was that rx_ships_data() was re-running whenever selected_ships() changed, causing the DataTable to re-render and lose its selection state.
+
+  Key changes made:
+
+  1. Fixed the reactivity cycle in rx_ships_data() (line 58) by removing the selected_ships parameter - the ships table should always show all ships regardless of
+  selection
+  2. Added comprehensive debug logging throughout the reactive functions:
+    - [rx_map_data] logs when triggered with current ship selection
+    - [rx_time_series_data] logs when triggered with current ship selection
+    - [observe ship selection] logs selected rows and MMSIs
+    - [ship_subset_text] logs current selection state
+    - [reset_ships] logs when reset button is clicked
+
+  The ship selection should now persist properly without flickering. The diagnostic messages will help track the reactive flow and identify any remaining issues.
+
 ## 2025-09-10.a optimize queries by folding in filtering and aggregation
 
 Separating the `filtered_data()` from `cell_metrics()` in @app_company/server.R

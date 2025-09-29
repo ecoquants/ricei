@@ -27,9 +27,9 @@ get_company_choices <- function(con, verbose = interactive()) {
     dplyr::pull(company)
   if (verbose) message("[get_company_choices] Found ", length(companies), " companies")
   
-  c("All" = "All",
-    "All Companies" = "All Companies", 
-    "Other Companies" = "Other Companies",
+  c("All"              = "All",
+    "Chosen Companies" = "Chosen Companies", 
+    "Other Companies"  = "Other Companies",
     setNames(companies, companies))
 }
 
@@ -59,8 +59,9 @@ get_speed_range <- function(con, verbose = interactive()) {
   if (verbose) message("[get_speed_range] Speed range: ", speeds$min_speed, " to ", speeds$max_speed, " knots")
   
   c(
-    min = speeds$min_speed, 
-    max = speeds$max_speed)
+    min = 0, 
+    # round up max speed to nearest increment of 20
+    max = ceiling(speeds$max_speed / 20) * 20)
 }
 
 # data processing functions ----
@@ -78,9 +79,9 @@ build_where_clause <- function(con, company_filter = NULL, month_range = NULL,
   # Company clause
   company_clause <- switch(
     company_filter,
-    "All" = NULL,
-    "All Companies" = "EXISTS (SELECT 1 FROM company c2 WHERE s.operator ILIKE '%' || c2.operator_lookup || '%')",
-    "Other Companies" = "NOT EXISTS (SELECT 1 FROM company c2 WHERE s.operator ILIKE '%' || c2.operator_lookup || '%')",
+    "All"              = NULL,
+    "Chosen Companies" = "EXISTS (SELECT 1 FROM company c2 WHERE s.operator ILIKE '%' || c2.operator_lookup || '%')",
+    "Other Companies"  = "NOT EXISTS (SELECT 1 FROM company c2 WHERE s.operator ILIKE '%' || c2.operator_lookup || '%')",
     {
       glue::glue_sql(
         "EXISTS (SELECT 1 FROM company c2 WHERE c2.company = {company_filter} AND s.operator ILIKE '%' || c2.operator_lookup || '%')",
@@ -163,17 +164,18 @@ get_map_data <- function(con, company_filter, month_range, speed_range,
   query <- glue::glue_sql("
     SELECT
       c.cell_id,
-      c.cell_ll_lon,
-      c.cell_ll_lat,
-      ST_AsText(c.geom) AS geom_wkt,
+      -- c.cell_ll_lon,
+      -- c.cell_ll_lat,
+      -- ST_AsText(c.geom) AS geom_wkt,
       {DBI::SQL(metric_sql)} AS metric_value
     FROM cell c
     JOIN ship_cell sc ON c.cell_id = sc.cell_id
     JOIN ship s ON sc.mmsi = s.mmsi
     {where_sql}
-    GROUP BY c.cell_id, c.cell_ll_lon, c.cell_ll_lat, c.geom
+    GROUP BY c.cell_id, c.geom  -- , c.cell_ll_lon, c.cell_ll_lat
     HAVING {DBI::SQL(metric_sql)} IS NOT NULL
   ", .con = con)
+  # TODO: drop geom_wkt in favor of cell_id to mapgl::add_h3j_source(); requires maplibre() vs mapboxgl()
   
   if (verbose) {
     message("[get_map_data] Running aggregation query:")
@@ -183,7 +185,44 @@ get_map_data <- function(con, company_filter, month_range, speed_range,
     message("  Selected ships: ", ifelse(is.null(selected_ships), "None", length(selected_ships)))
     message("  Metric: ", metric)
     message("  Weight by: ", weight_by)
+    message("  SQL query: ", query)
   }
+  
+  
+  # DEBUG BEG ----
+  
+  # browser()
+  # q <- "SELECT
+  # c.cell_id,
+  # -- c.cell_ll_lon,
+  # -- c.cell_ll_lat,
+  # -- ST_AsText(c.geom) AS geom_wkt,
+  # SUM(sc.avg_speed_knots * sc.hours) / NULLIF(SUM(sc.hours), 0) AS metric_value
+  # FROM cell c
+  # JOIN ship_cell sc ON c.cell_id = sc.cell_id
+  # -- JOIN ship s ON sc.mmsi = s.mmsi
+  # GROUP BY c.cell_id --, c.cell_ll_lon, c.cell_ll_lat, c.geom
+  # -- HAVING SUM(sc.avg_speed_knots * sc.hours) / NULLIF(SUM(sc.hours), 0) IS NOT NULL"
+  # result <- DBI::dbGetQuery(con, q)
+  # 
+  # d_ship <- tbl(con, "ship") |> collect()
+  # nrow(d_ship)
+  # 
+  # # get number of rows in ship table
+  # tbl(con, "ship") |> count() |> collect() # 49,145,861
+  # 
+  # # get duplicate rows from ship table with same mmsi
+  # d_ship_dupes <- tbl(con, "ship") |>
+  #   group_by(mmsi) |>
+  #   filter(n() > 1) |>
+  #   arrange(mmsi) |>
+  #   collect()                              # 49,145,765
+  # d_ship_dupes |> 
+  #   filter(mmsi == 205042000) |> 
+  #   arrange(mmsi, updated_date) |>
+  #   relocate(mmsi, updated_date, source_table) |>
+  #   View()
+  # DEBUG END ----
   
   start_time <- Sys.time()
   result <- DBI::dbGetQuery(con, query)
@@ -198,8 +237,11 @@ get_map_data <- function(con, company_filter, month_range, speed_range,
     return(NULL)
   }
   
-  # Convert to sf object
-  sf::st_as_sf(result, wkt = "geom_wkt", crs = 4326)
+  # sf::st_as_sf(result, wkt = "geom_wkt", crs = 4326)
+  
+  # join cell geometry as sf object
+  ply_cells |> 
+    inner_join(result, by = "cell_id")
 }
 
 #' Get ships summary aggregated in database
@@ -319,13 +361,23 @@ get_time_series_data <- function(con, company_filter, month_range, speed_range,
 # visualization functions ----
 
 #' Create choropleth map with mapgl
-#' @param cell_sf sf object with cells and metric values
+#' @param cell_sf sf object with cells and metric values (requires field `metric_value`)
 #' @param metric_name Name of the metric being displayed
 #' @param verbose Show debug messages
 #' @return mapgl map object
-create_choropleth_map <- function(cell_sf, metric_name, verbose = interactive()) {
+create_choropleth_map <- function(
+    cell_sf, 
+    metric_name, 
+    verbose   = interactive(),
+    dark_mode = T) {
   
   if (verbose) message("[create_choropleth_map] Creating map for: ", metric_name)
+  
+  # check for required field
+  if (!"metric_value" %in% colnames(cell_sf))
+    stop("cell_sf must contain a 'metric_value' column")
+  
+  style <- if (dark_mode) "mapbox://styles/mapbox/dark-v11" else "mapbox://styles/mapbox/light-v11"
   
   if (is.null(cell_sf) || nrow(cell_sf) == 0) {
     if (verbose) message("[create_choropleth_map] No data to map, returning empty map")
@@ -334,42 +386,41 @@ create_choropleth_map <- function(cell_sf, metric_name, verbose = interactive())
       mapgl::mapboxgl(
         center = c(-89, 26),
         zoom = 5,
-        style = "mapbox://styles/mapbox/light-v11"
-      )
-    )
+        style = style) )
   }
   
-  # create color palette
-  pal <- leaflet::colorNumeric(
-    palette = "Spectral",
-    domain = cell_sf$metric_value,
-    reverse = TRUE
-  )
+  cell_sf2 = cell_sf |> 
+    mutate(
+      popup   = glue("<b>{metric_name}</b>: {format(round(metric_value, 2), big.mark=',')}"),
+      tooltip = glue("<b>{metric_name}</b>: {format(round(metric_value, 2), big.mark=',')}") )
   
-  # add colors to sf object
-  cell_sf$fill_color <- pal(cell_sf$metric_value)
-  
+  # Automatic continuous scale with equal breaks
+  continuous_scale <- interpolate_palette(
+    data   = cell_sf2,
+    column = "metric_value",
+    method = "equal", # = "jenks",
+    n = 5,
+    palette = viridisLite::turbo,
+    na_color = "grey")
+    
   # create map
   map <- mapgl::mapboxgl(
-    center = c(
-      mean(sf::st_coordinates(sf::st_centroid(cell_sf))[,1]),
-      mean(sf::st_coordinates(sf::st_centroid(cell_sf))[,2])
-    ),
-    zoom = 5,
-    style = "mapbox://styles/mapbox/light-v11"
-  ) |>
+    style = style) |>
+    fit_bounds(cell_sf2) |> 
     mapgl::add_fill_layer(
       id = "cells",
-      source = cell_sf,
-      fill_color = "fill_color",
+      source = cell_sf2,
+      fill_color   = continuous_scale$expression,
       fill_opacity = 0.7,
-      popup = paste0(
-        "<b>", metric_name, ":</b> ", 
-        round(cell_sf$metric_value, 2)
-      )
-    )
+      tooltip = "tooltip",
+      popup   = "popup") |> 
+    add_legend(
+      metric_name,
+      values = get_legend_labels(continuous_scale, digits = 0),
+      colors = get_legend_colors(continuous_scale),
+      type = "continuous")
   
-  return(map)
+  map
 }
 
 #' Create time series plot with dygraphs
