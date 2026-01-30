@@ -426,22 +426,55 @@ create_choropleth_map <- function(
 #' Create time series plot with dygraphs
 #' @param ts_data Data frame with date and value columns
 #' @param metric_name Name of the metric being displayed
+#' @param dark_mode Whether to use dark mode styling
 #' @param verbose Show debug messages
 #' @return dygraph object
-create_time_series_plot <- function(ts_data, metric_name, verbose = interactive()) {
-  
+create_time_series_plot <- function(ts_data, metric_name, dark_mode = TRUE,
+                                    verbose = interactive()) {
+
   if (verbose) message("[create_time_series_plot] Creating plot for: ", metric_name)
-  
+
+  # set colors based on dark/light mode
+  if (dark_mode) {
+    axis_label_color <- "#cccccc"
+    axis_line_color  <- "#666666"
+    grid_line_color  <- "#444444"
+    title_color      <- "#ffffff"
+  } else {
+    axis_label_color <- "#333333"
+    axis_line_color  <- "#333333"
+    grid_line_color  <- "#cccccc"
+    title_color      <- "#000000"
+  }
+
   # convert to xts for dygraphs
   ts_xts <- xts::xts(ts_data$value, order.by = ts_data$date)
-  
+
+  # custom x-axis formatter to use short year format (e.g., "Feb '23")
+  axis_label_formatter <- htmlwidgets::JS(
+    "function(d) {
+      var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return months[d.getMonth()] + \" '\" + String(d.getFullYear()).slice(-2);
+    }"
+  )
+
   dygraphs::dygraph(ts_xts, main = paste(metric_name, "over time")) |>
     dygraphs::dySeries("V1", label = metric_name) |>
+    dygraphs::dyAxis("x", axisLabelFormatter = axis_label_formatter) |>
     dygraphs::dyRangeSelector() |>
     dygraphs::dyOptions(
-      strokeWidth = 2,
-      drawPoints = TRUE,
-      pointSize = 3
+      strokeWidth    = 2,
+      drawPoints     = TRUE,
+      pointSize      = 3,
+      axisLabelColor = axis_label_color,
+      axisLineColor  = axis_line_color,
+      gridLineColor  = grid_line_color
+    ) |>
+    dygraphs::dyCSS(
+      textConnection(glue::glue("
+        .dygraph-title {{ color: {title_color}; }}
+        .dygraph-legend {{ color: {axis_label_color}; }}
+      "))
     )
 }
 

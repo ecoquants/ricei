@@ -137,11 +137,12 @@ function(input, output, session) {
   
   # time_series ----
   output$time_series <- dygraphs::renderDygraph({
-    req(rx_time_series_data())
-    
+    req(rx_time_series_data(), input$tgl_dark)
+
     create_time_series_plot(
       ts_data     = rx_time_series_data(),
-      metric_name = names(metric_options)[metric_options == input$metric]
+      metric_name = names(metric_options)[metric_options == input$metric],
+      dark_mode   = input$tgl_dark == "dark"
     )
   })
   
