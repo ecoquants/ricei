@@ -44,7 +44,6 @@ load_spatial(con_goa)
 
 # dbListTables(con_gfw)
 # dbListTables(con_goa)
-
 ```
 
 ## Read Whale Density Hexagons
@@ -428,15 +427,19 @@ View(d_dupe1)
 librarian::shelf(mregions2)
 # sf_use_s2() # TRUE so buffer in meters
 
-gomex <- gaz_geometry(4288)
-
-p_whales <- h_whales |> 
-  st_union()
-
-p_goa <- st_union(gomex, p_whales) |> 
-  st_buffer(10000) # 10 km buffer
-
-write_sf(p_goa, goa_geo, delete_dsn = TRUE)
+if (!file.exists(goa_geo)){
+  gomex <- gaz_geometry(4288)
+  
+  p_whales <- h_whales |> 
+    st_union()
+  
+  p_goa <- st_union(gomex, p_whales) |> 
+    st_buffer(10000) # 10 km buffer
+  
+  write_sf(p_goa, goa_geo, delete_dsn = TRUE)
+} else {
+  p_goa <- read_sf(goa_geo)
+}
 
 (mapview(
   p_goa, 
@@ -457,6 +460,8 @@ write_sf(p_goa, goa_geo, delete_dsn = TRUE)
 ### Subset Global Data to Gulf of America
 
 ```{r subset_goa}
+#| eval: false
+
 p_goa <- read_sf(goa_geo)
 
 librarian::shelf(duckspatial)
@@ -653,7 +658,7 @@ dbExecute(con_goa, glue(
 b <- st_bbox(h_whales) |> as.numeric()
 
 # [s]hip [c]ell date number of observations
-sc_date_n <- tbl(con, "ship_cell") |> 
+sc_date_n <- tbl(con_goa, "ship_cell") |> 
   filter(
     cell_ll_lon >= !!b[1],
     cell_ll_lat >= !!b[2],
@@ -765,13 +770,13 @@ for (i in 1:nrow(d_c)){ # i = 1
 leaflet() |> 
   addProviderTiles("Esri.OceanBasemap") |> 
   addPolygons(
-    data        = h_w,
+    data        = h_whales,
     fillColor   = "blue",
     fillOpacity = 0.5,
     color       = "black",
     weight      = 1,
     opacity     = 1,
-    label       = ~glue("Hex ID: {HEXID}")) # |> 
+    label       = ~glue("Hex ID: {hex_id}")) # |> 
   # setView(lng = -89, lat = 25, zoom = 5) # zoom: 5
 
 # bounding box of whale densities

@@ -1,0 +1,357 @@
+---
+title: "Rice's Whale Ship-Strike Risk Analysis"
+subtitle: "NRDC Contract - 2023 AIS Data Analysis"
+author: "Ben Best, EcoQuants LLC"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    code-summary: "Show code"
+execute:
+  warning: false
+  message: false
+---
+
+```{r setup}
+#| label: setup
+
+# load libraries ----
+librarian::shelf(
+  DBI, dplyr, duckdb, glue, here, knitr, leaflet, lubridate,
+  purrr, sf, tibble, tidyr, viridisLite,
+  quiet = TRUE
+)
+
+# source risk functions ----
+source(here("scripts/risk_functions.R"))
+
+# set paths ----
+is_server   <- Sys.info()[["sysname"]] == "Linux"
+dir_private <- ifelse(is_server, "/share/private", "~/My Drive/private")
+dir_data    <- ifelse(is_server, "/share/data/ricei", "~/My Drive/projects/ricei/data")
+goa_db      <- glue("{dir_data}/raw/ships/gulf_of_mexico_2023/goa.duckdb")
+
+# connect to database ----
+con <- DBI::dbConnect(duckdb::duckdb(), dbdir = goa_db, read_only = TRUE)
+DBI::dbExecute(con, "INSTALL spatial; LOAD spatial;")
+```
+
+## Overview
+
+This analysis calculates ship-strike risk for Rice's whale (*Balaenoptera ricei*) in the Gulf of Mexico, using:
+
+- **Whale densities:** Litz et al. (2022) hexagonal grid model
+- **Vessel traffic:** 2023 AIS data from Benioff Ocean Science Laboratory
+- **Risk model:** Conn & Silber (2013) speed-based risk factors
+
+### Risk Factor Model
+
+Based on Conn & Silber (2013), strike risk increases non-linearly with vessel speed:
+```{r}
+#| label: risk-factors-table
+
+tibble(
+  `Speed Bin`   = RISK_FACTORS$labels,
+  `Risk Factor` = RISK_FACTORS$factors,
+  `Rationale`   = c(
+    "Baseline (slowdown target)",
+    "Midpoint 11 kt",
+    "Midpoint 13.5 kt",
+    "Conservative at 15 kt"
+  )
+) |>
+  kable()
+```
+
+## Data Inventory
+
+### Database Tables
+
+```{r}
+#| label: db-inventory
+
+# list tables
+tables <- DBI::dbListTables(con)
+cat("Tables in goa.duckdb:", paste(tables, collapse = ", "), "\n\n")
+
+# count records
+for (tbl_name in tables) {
+  n <- tbl(con, tbl_name) |> count() |> collect() |> pull(n)
+  cat(glue("{tbl_name}: {format(n, big.mark=',')} records"), "\n")
+}
+```
+
+### Spatial Data Files
+
+```{r}
+#| label: spatial-inventory
+
+dir_local_data <- here("data")
+
+spatial_files <- c(
+  "whales.geojson",
+  "crithab_subareas.geojson",
+  "nmfs_crit_hab.geojson",
+  "goa.geojson"
+)
+
+for (f in spatial_files) {
+  fpath <- file.path(dir_local_data, f)
+  if (file.exists(fpath)) {
+    sf_obj <- sf::st_read(fpath, quiet = TRUE)
+    cat(glue("{f}: {nrow(sf_obj)} features, {ncol(sf_obj)} fields"), "\n")
+  } else {
+    cat(glue("{f}: NOT FOUND"), "\n")
+  }
+}
+```
+
+## Phase 1: Data Preparation
+
+### 1.1 Load Spatial Boundaries
+
+```{r}
+#| label: load-spatial
+
+# study area
+ply_goa <- sf::st_read(here("data/goa.geojson"), quiet = TRUE)
+
+# critical habitat
+ply_crithab <- sf::st_read(here("data/nmfs_crit_hab.geojson"), quiet = TRUE)
+
+# subareas (7 fairway/port approaches)
+ply_subareas <- sf::st_read(here("data/crithab_subareas.geojson"), quiet = TRUE)
+
+# whale densities
+ply_whales <- sf::st_read(here("data/whales.geojson"), quiet = TRUE)
+```
+
+### 1.2 Speed Distribution Summary
+
+```{r}
+#| label: speed-distribution
+
+# query speed distribution with bins
+speed_sql <- glue("
+  SELECT
+    {get_speed_bin_sql()} AS speed_bin,
+    COUNT(*) AS n_records,
+    SUM(dist_travelled_km) AS total_km,
+    SUM(hours) AS total_hours
+  FROM ship_cell
+  WHERE avg_speed_knots IS NOT NULL
+  GROUP BY speed_bin
+  ORDER BY speed_bin
+")
+
+speed_dist <- DBI::dbGetQuery(con, speed_sql)
+speed_dist |>
+  mutate(
+    pct_records = n_records / sum(n_records) * 100,
+    pct_km      = total_km / sum(total_km) * 100,
+    pct_hours   = total_hours / sum(total_hours) * 100
+  ) |>
+  kable(
+    digits = 1,
+    format.args = list(big.mark = ","),
+    col.names = c(
+      "Speed Bin", "Records", "Distance (km)", "Hours",
+      "% Records", "% Distance", "% Hours"
+    )
+  )
+```
+
+### 1.3 Company Fleet Summary
+
+```{r}
+#| label: company-summary
+
+# query company traffic in critical habitat
+company_sql <- "
+  SELECT
+    c.company,
+    COUNT(DISTINCT sc.mmsi) AS n_ships,
+    COUNT(*) AS n_records,
+    SUM(sc.dist_travelled_km) AS total_km,
+    SUM(sc.hours) AS total_hours
+  FROM ship_cell sc
+  JOIN ship s ON sc.mmsi = s.mmsi
+  JOIN company c ON s.operator ILIKE '%' || c.operator_lookup || '%'
+  GROUP BY c.company
+  ORDER BY total_km DESC
+"
+
+company_summary <- DBI::dbGetQuery(con, company_sql)
+company_summary |>
+  mutate(
+    pct_km    = total_km / sum(total_km) * 100,
+    pct_hours = total_hours / sum(total_hours) * 100
+  ) |>
+  kable(
+    digits = 1,
+    format.args = list(big.mark = ","),
+    col.names = c(
+      "Company", "Ships", "Records", "Distance (km)", "Hours",
+      "% Distance", "% Hours"
+    )
+  )
+```
+
+## Phase 2: Risk Calculations
+
+### 2.1 Traffic by Speed Bin and Cell
+
+```{r}
+#| label: traffic-by-cell-speed
+#| eval: false
+
+# this query aggregates traffic by cell and speed bin
+# for intersection with whale densities
+traffic_sql <- glue("
+  SELECT
+    c.cell_id,
+    {get_speed_bin_sql()} AS speed_bin,
+    SUM(sc.dist_travelled_km) AS total_km,
+    SUM(sc.hours) AS total_hours,
+    COUNT(DISTINCT sc.mmsi) AS n_ships
+  FROM cell c
+  JOIN ship_cell sc ON c.cell_id = sc.cell_id
+  WHERE sc.avg_speed_knots IS NOT NULL
+  GROUP BY c.cell_id, speed_bin
+")
+
+# NOTE: execute this query and join with whale densities
+# traffic_by_cell <- DBI::dbGetQuery(con, traffic_sql)
+```
+
+### 2.2 Risk by Area (placeholder)
+
+```{r}
+#| label: risk-by-area
+#| eval: false
+
+# TODO: implement spatial intersection and risk calculation
+# 1. intersect whale hexagons with ship cell grid
+# 2. intersect results with critical habitat and subareas
+# 3. apply calc_speed_weighted_risk() function
+# 4. summarize by area using summarize_risk_by_area()
+```
+
+## Deliverable Maps
+
+### D1a: Rice's Whale Densities
+
+```{r}
+#| label: map-whale-density
+
+# basic leaflet map of whale densities
+leaflet() |>
+
+  addProviderTiles("CartoDB.Positron") |>
+  addPolygons(
+    data = ply_goa,
+    fillColor = "transparent",
+    color = "gray",
+    weight = 1,
+    label = "Study Area"
+  ) |>
+  addPolygons(
+    data = ply_crithab,
+    fillColor = "blue",
+    fillOpacity = 0.2,
+    color = "blue",
+    weight = 2,
+    label = "Critical Habitat"
+  ) |>
+  addPolygons(
+    data = ply_subareas,
+    fillColor = "orange",
+    fillOpacity = 0.3,
+    color = "orange",
+    weight = 2,
+    label = ~as.character(1:nrow(ply_subareas))
+  )
+```
+
+### D1b: Vessel Traffic (placeholder)
+
+```{r}
+#| label: map-traffic
+#| eval: false
+
+# TODO: create choropleth of vessel traffic by cell
+```
+### D1c: Strike Risk (placeholder)
+
+```{r}
+#| label: map-risk
+#| eval: false
+
+# TODO: create choropleth of strike risk by cell
+```
+
+## Deliverable Tables
+
+### D2: Whale Densities by Area
+
+```{r}
+#| label: tbl-whale-density
+#| eval: false
+
+# TODO: summarize whale densities by study area and critical habitat
+```
+
+### D3: Risk by Area (Unweighted)
+
+```{r}
+#| label: tbl-risk-unweighted
+#| eval: false
+
+# TODO: base risk (whale x traffic, no speed weighting)
+```
+
+### D4: Risk by Area (Speed-Weighted)
+
+```{r}
+#| label: tbl-risk-weighted
+#| eval: false
+
+# TODO: Conn/Silber weighted risk
+```
+
+### D5: Risk Reduction Scenarios
+
+```{r}
+#| label: tbl-risk-reduction
+#| eval: false
+
+# TODO: risk reduction from slowdown scenarios
+```
+
+### D7: Company-Specific Results
+
+```{r}
+#| label: tbl-company-risk
+#| eval: false
+
+# TODO: per-company risk and reduction
+```
+
+## Cleanup
+
+```{r}
+#| label: cleanup
+
+DBI::dbDisconnect(con, shutdown = TRUE)
+```
+
+## References
+
+- Best (unpub.) - Previous ship-strike risk analysis for Rice's whale
+- Benioff Ocean Science Laboratory (unpub.) - 2023 AIS analysis
+- Conn, P.B. & Silber, G.K. (2013). Vessel speed restrictions reduce risk of collision-related mortality for North Atlantic right whales. *Ecosphere* 4(4):43.
+- Litz, J.A., et al. (2022). Rice's whale (*Balaenoptera ricei*) spatial distribution, abundance, and status. *Marine Mammal Science* 38:1430-1451.
+- NMFS (2020). Endangered Species Act biological opinion on the federally regulated oil and gas program activities in the Gulf of Mexico.
+- NMFS (2023). Proposed rule to designate critical habitat for Rice's whale. 88 FR 47453.
