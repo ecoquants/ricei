@@ -26,7 +26,9 @@ stopifnot(all(file.exists(files_required)))
 
 # mapbox setup ----
 Sys.setenv(MAPBOX_ACCESS_TOKEN=readLines(mapbox_tkn_txt))
-librarian::shelf(mapgl)
+# Sys.getenv("MAPBOX_PUBLIC_TOKEN") # usethis::edit_r_environ() 
+librarian::shelf(
+  mapgl)
 
 # connect to database ----
 con <- connect_to_db(goa_db)
