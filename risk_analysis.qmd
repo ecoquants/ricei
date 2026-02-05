@@ -8,6 +8,7 @@ format:
     toc: true
     toc-depth: 3
     code-fold: true
+    number-sections: true
     code-summary: "Show code"
 execute:
   warning: false
@@ -407,6 +408,7 @@ map_rast_simple(
 
 ```{r}
 #| label: map-whale-density-monthly
+#| results: asis
 #| fig-cap: "Monthly Rice's whale density maps showing seasonal variation."
 
 # create monthly maps as tabs
