@@ -12,6 +12,8 @@ format:
 execute:
   warning: false
   message: false
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup}
@@ -19,8 +21,8 @@ execute:
 
 # load libraries ----
 librarian::shelf(
-  DBI, dplyr, duckdb, glue, here, knitr, leaflet, lubridate,
-  purrr, sf, tibble, tidyr, viridisLite,
+  DBI, dplyr, duckdb, glue, here, janitor, knitr, leaflet, leaflet.extras,
+  lubridate, purrr, sf, stringr, terra, tibble, tidyr, viridisLite,
   quiet = TRUE
 )
 
@@ -31,11 +33,14 @@ source(here("scripts/risk_functions.R"))
 is_server   <- Sys.info()[["sysname"]] == "Linux"
 dir_private <- ifelse(is_server, "/share/private", "~/My Drive/private")
 dir_data    <- ifelse(is_server, "/share/data/ricei", "~/My Drive/projects/ricei/data")
+dir_raw     <- glue("{dir_data}/raw")
 goa_db      <- glue("{dir_data}/raw/ships/gulf_of_mexico_2023/goa.duckdb")
+whales_shp  <- glue("{dir_raw}/whales/Rices_Whale_Monthly_Density.shp")
 
 # connect to database ----
-con <- DBI::dbConnect(duckdb::duckdb(), dbdir = goa_db, read_only = TRUE)
+con <- DBI::dbConnect(duckdb::duckdb(), dbdir = goa_db, read_only = FALSE)
 DBI::dbExecute(con, "INSTALL spatial; LOAD spatial;")
+# dbListTables(con)  # "cell"       "company"    "goa"        "ship"       "ship_cell"  "whale"      "whale_cell"
 ```
 
 ## Overview
@@ -126,9 +131,65 @@ ply_subareas <- sf::st_read(here("data/crithab_subareas.geojson"), quiet = TRUE)
 
 # whale densities
 ply_whales <- sf::st_read(here("data/whales.geojson"), quiet = TRUE)
+
 ```
 
-### 1.2 Speed Distribution Summary
+### 1.2 Import Whale Densities
+
+Import the 2021 Rice's whale density data (Litz et al. 2022) into DuckDB tables using direct rasterization:
+
+- `whale`: metadata for each month/metric combination
+- `whale_cell`: cell-level density values matching the vessel grid
+
+```{r}
+#| label: import-whale-densities
+
+# check if whale tables already exist
+existing_tables <- DBI::dbListTables(con)
+whale_exists      <- "whale" %in% existing_tables
+whale_cell_exists <- "whale_cell" %in% existing_tables
+
+if (!whale_exists || !whale_cell_exists) {
+  cat("Whale tables not found. Importing using rasterization...\n")
+
+  # create canonical raster template
+  r_template <- create_cell_template(ply_goa)
+
+  # process whale shapefile (rasterize to cell grid)
+  whale_data <- process_whale_density(
+    shp_path   = whales_shp,
+    r_template = r_template,
+    verbose    = TRUE
+  )
+
+  # import to database
+  import_whale_to_duckdb(
+    con            = con,
+    whale_tbl      = whale_data$whale_tbl,
+    whale_cell_tbl = whale_data$whale_cell_tbl,
+    r_template     = r_template,
+    overwrite      = TRUE,
+    verbose        = TRUE
+  )
+} else {
+  cat("Tables 'whale' and 'whale_cell' already exist in database.\n")
+}
+
+# create canonical raster template (if not already created above)
+if (!exists("r_template"))
+  r_template <- create_cell_template(ply_goa)
+
+cat("\nRaster template:", nrow(r_template), "x", ncol(r_template), "cells\n")
+
+# show summary if tables exist
+if ("whale" %in% DBI::dbListTables(con)) {
+  cat("\nWhale table summary:\n")
+  DBI::dbGetQuery(con, "SELECT * FROM whale ORDER BY month_int, metric") |>
+    kable(digits = 4)
+}
+```
+
+### 1.3 Speed Distribution Summary
 
 ```{r}
 #| label: speed-distribution
@@ -199,97 +260,290 @@ company_summary |>
   )
 ```
 
+### 1.4 Area Lookup (cell → geographic area)
+
+Assign each raster cell to geographic areas (Study Area, Critical Habitat, Subareas 1–7) for grouped summaries.
+
+```{r}
+#| label: area-lookup
+
+# rasterize subareas (cell_id → subarea_id)
+r_sub <- terra::rasterize(
+  terra::vect(ply_subareas), r_template, field = "subarea_id")
+sub_df <- terra::as.data.frame(r_sub, cells = TRUE, na.rm = TRUE)
+names(sub_df) <- c("cell_id", "subarea_id")
+
+# rasterize critical habitat (cell_id → 1 if inside)
+r_ch <- terra::rasterize(
+  terra::vect(ply_crithab), r_template, field = 1)
+ch_df <- terra::as.data.frame(r_ch, cells = TRUE, na.rm = TRUE)
+names(ch_df) <- c("cell_id", "in_crithab")
+
+# build lookup: every cell in DB is in the study area
+area_lookup <- DBI::dbGetQuery(con, "SELECT DISTINCT cell_id FROM cell") |>
+  left_join(sub_df, by = "cell_id") |>
+  left_join(ch_df,  by = "cell_id") |>
+  mutate(in_crithab = !is.na(in_crithab))
+
+# expand to long format: one row per cell per area it belongs to
+area_long <- bind_rows(
+  # every cell → study area
+  area_lookup |>
+    mutate(area_label = "Study Area") |>
+    select(cell_id, area_label),
+  # critical habitat cells
+  area_lookup |>
+    filter(in_crithab) |>
+    mutate(area_label = "Critical Habitat") |>
+    select(cell_id, area_label),
+  # subarea cells
+  area_lookup |>
+    filter(!is.na(subarea_id)) |>
+    mutate(area_label = paste("Subarea", subarea_id)) |>
+    select(cell_id, area_label)
+)
+
+cat("Area lookup cells:", nrow(area_lookup), "\n")
+cat("Area-long rows:",    nrow(area_long), "\n")
+area_long |> count(area_label) |> kable()
+```
+
 ## Phase 2: Risk Calculations
 
 ### 2.1 Traffic by Speed Bin and Cell
 
 ```{r}
 #| label: traffic-by-cell-speed
-#| eval: false
 
-# this query aggregates traffic by cell and speed bin
-# for intersection with whale densities
+# aggregate traffic by cell and speed bin
 traffic_sql <- glue("
   SELECT
-    c.cell_id,
+    cell_id,
     {get_speed_bin_sql()} AS speed_bin,
-    SUM(sc.dist_travelled_km) AS total_km,
-    SUM(sc.hours) AS total_hours,
-    COUNT(DISTINCT sc.mmsi) AS n_ships
-  FROM cell c
-  JOIN ship_cell sc ON c.cell_id = sc.cell_id
-  WHERE sc.avg_speed_knots IS NOT NULL
-  GROUP BY c.cell_id, speed_bin
+    SUM(dist_travelled_km) AS total_km,
+    SUM(hours) AS total_hours,
+    COUNT(DISTINCT mmsi) AS n_ships
+  FROM ship_cell
+  WHERE avg_speed_knots IS NOT NULL
+  GROUP BY cell_id, speed_bin
 ")
 
-# NOTE: execute this query and join with whale densities
-# traffic_by_cell <- DBI::dbGetQuery(con, traffic_sql)
+traffic_by_cell <- DBI::dbGetQuery(con, traffic_sql)
+cat("Traffic rows:", nrow(traffic_by_cell),
+    "| Cells:", n_distinct(traffic_by_cell$cell_id), "\n")
 ```
 
-### 2.2 Risk by Area (placeholder)
+### 2.2 Risk by Area
 
 ```{r}
 #| label: risk-by-area
-#| eval: false
 
-# TODO: implement spatial intersection and risk calculation
-# 1. intersect whale hexagons with ship cell grid
-# 2. intersect results with critical habitat and subareas
-# 3. apply calc_speed_weighted_risk() function
-# 4. summarize by area using summarize_risk_by_area()
+# get annual whale density per cell
+whale_annual <- DBI::dbGetQuery(con, "
+  SELECT cell_id, value AS whale_density
+  FROM whale_cell
+  WHERE month_int = 0 AND metric = 'n'")
+
+# join: traffic × whale density
+risk_data <- traffic_by_cell |>
+  inner_join(whale_annual, by = "cell_id") |>
+  mutate(
+    traffic   = total_km,
+    speed_bin = factor(speed_bin, levels = RISK_FACTORS$labels))
+
+cat("Risk data rows:", nrow(risk_data),
+    "| Cells with both whale + traffic:", n_distinct(risk_data$cell_id), "\n")
+
+# join with area long-format and summarize by area
+risk_area_data <- risk_data |>
+  inner_join(area_long, by = "cell_id", relationship = "many-to-many")
+
+risk_by_area <- summarize_risk_by_area(
+  risk_area_data,
+  area_col = "area_label",
+  verbose  = FALSE)
+
+# order areas: study area first, then critical habitat, then subareas
+area_order <- c("Study Area", "Critical Habitat",
+                paste("Subarea", 1:7))
+risk_by_area <- risk_by_area |>
+  mutate(area_label = factor(area_label, levels = area_order)) |>
+  arrange(area_label)
+
+risk_by_area |> kable(digits = 2)
 ```
 
 ## Deliverable Maps
 
-### D1a: Rice's Whale Densities
+### D1a: Rice's Whale Densities (Annual Average)
+
+Map of annual average whale density (n = number of individuals per cell) from Litz et al. (2022).
 
 ```{r}
-#| label: map-whale-density
+#| label: map-whale-density-annual
+#| fig-cap: "Annual average Rice's whale density from Litz et al. (2022) model. Values represent number of individuals per 0.1° cell."
 
-# basic leaflet map of whale densities
+# get annual average whale density raster
+r_whale_annual <- get_whale_raster(
+  con        = con,
+  month_int  = 0,
+  metric     = "n",
+  r_template = r_template
+)
+
+# create map with critical habitat overlay
+map_rast_simple(
+  r             = r_whale_annual,
+  legend_title  = "Whale Density<br><small>(n per cell)</small>",
+  colors        = "Spectral",
+  group         = "whale_density",
+  overlay_sf    = ply_crithab,
+  overlay_color = "blue",
+  overlay_label = "Critical Habitat"
+)
+```
+
+### D1a-monthly: Monthly Whale Densities
+
+```{r}
+#| label: map-whale-density-monthly
+#| fig-cap: "Monthly Rice's whale density maps showing seasonal variation."
+
+# create monthly maps as tabs
+cat("::: {.panel-tabset}\n\n")
+
+for (m in 1:12) { # m = 1
+  cat(glue("#### {month.abb[m]}\n\n"))
+
+  r_month <- get_whale_raster(
+    con        = con,
+    month_int  = m,
+    metric     = "n",
+    r_template = r_template
+  )
+
+  map_out <- map_rast_simple(
+    r            = r_month,
+    legend_title = glue("Whale Density<br><small>({month.abb[m]})</small>"),
+    colors       = "Spectral",
+    group        = glue("whale_{month.abb[m]}")
+  )
+
+  # print map
+  print(htmltools::tagList(map_out))
+  cat("\n\n")
+}
+
+cat(":::\n")
+```
+
+### D1a-cv: Whale Density Uncertainty (CV)
+
+Map of coefficient of variation (CV) for annual average whale density, showing spatial uncertainty in the model predictions.
+
+```{r}
+#| label: map-whale-cv
+#| fig-cap: "Coefficient of variation (CV) for annual average whale density estimates."
+
+# get annual average CV raster
+r_whale_cv <- get_whale_raster(
+  con        = con,
+  month_int  = 0,
+  metric     = "cv",
+  r_template = r_template
+)
+
+map_rast_simple(
+  r            = r_whale_cv,
+  legend_title = "CV<br><small>(uncertainty)</small>",
+  colors       = "YlOrRd",
+  group        = "whale_cv"
+)
+```
+
+### D1a-boundaries: Study Area Boundaries
+
+```{r}
+#| label: map-boundaries
+
+# basic leaflet map of study area boundaries
 leaflet() |>
-
   addProviderTiles("CartoDB.Positron") |>
   addPolygons(
-    data = ply_goa,
-    fillColor = "transparent",
-    color = "gray",
-    weight = 1,
-    label = "Study Area"
+    data        = ply_goa,
+    fillColor   = "transparent",
+    color       = "gray",
+    weight      = 1,
+    label       = "Study Area"
   ) |>
   addPolygons(
-    data = ply_crithab,
-    fillColor = "blue",
+    data        = ply_crithab,
+    fillColor   = "blue",
     fillOpacity = 0.2,
-    color = "blue",
-    weight = 2,
-    label = "Critical Habitat"
+    color       = "blue",
+    weight      = 2,
+    label       = "Critical Habitat"
   ) |>
   addPolygons(
-    data = ply_subareas,
-    fillColor = "orange",
+    data        = ply_subareas,
+    fillColor   = "orange",
     fillOpacity = 0.3,
-    color = "orange",
-    weight = 2,
-    label = ~as.character(1:nrow(ply_subareas))
+    color       = "orange",
+    weight      = 2,
+    label       = ~as.character(1:nrow(ply_subareas))
   )
 ```
 
-### D1b: Vessel Traffic (placeholder)
+### D1b: Vessel Traffic
+
+Map of total vessel traffic (distance traveled in km) per 0.1° cell from 2023 AIS data.
 
 ```{r}
 #| label: map-traffic
-#| eval: false
+#| fig-cap: "Vessel traffic density (total km traveled) from 2023 AIS data."
 
-# TODO: create choropleth of vessel traffic by cell
+r_traffic <- get_traffic_raster(
+  con        = con,
+  metric     = "km",
+  r_template = r_template)
+
+map_rast_simple(
+  r             = r_traffic,
+  legend_title  = "Traffic<br><small>(km)</small>",
+  colors        = "YlOrRd",
+  group         = "traffic",
+  overlay_sf    = ply_crithab,
+  overlay_color = "blue",
+  overlay_label = "Critical Habitat")
 ```
-### D1c: Strike Risk (placeholder)
+### D1c: Strike Risk
+
+Map of speed-weighted ship-strike risk per cell (whale density × traffic × Conn/Silber risk factor).
 
 ```{r}
 #| label: map-risk
-#| eval: false
+#| fig-cap: "Speed-weighted ship-strike risk for Rice's whale. Risk = whale density × vessel km × Conn/Silber (2013) speed factor."
 
-# TODO: create choropleth of strike risk by cell
+# aggregate risk to per-cell totals (speed-weighted)
+risk_per_cell <- risk_data |>
+  mutate(
+    risk_factor = get_risk_factor(speed_bin),
+    cell_risk   = whale_density * traffic * risk_factor) |>
+  group_by(cell_id) |>
+  summarize(risk = sum(cell_risk, na.rm = TRUE), .groups = "drop")
+
+r_risk <- terra::init(r_template, NA)
+r_risk[risk_per_cell$cell_id] <- risk_per_cell$risk
+names(r_risk) <- "strike_risk"
+
+map_rast_simple(
+  r             = r_risk,
+  legend_title  = "Strike Risk<br><small>(weighted)</small>",
+  colors        = "YlOrRd",
+  group         = "strike_risk",
+  overlay_sf    = ply_crithab,
+  overlay_color = "blue",
+  overlay_label = "Critical Habitat")
 ```
 
 ## Deliverable Tables
@@ -298,45 +552,119 @@ leaflet() |>
 
 ```{r}
 #| label: tbl-whale-density
-#| eval: false
 
-# TODO: summarize whale densities by study area and critical habitat
+# summarize whale densities by area
+whale_by_area <- whale_annual |>
+  inner_join(area_long, by = "cell_id", relationship = "many-to-many") |>
+  group_by(area_label) |>
+  summarize(
+    n_cells       = n(),
+    mean_density  = mean(whale_density, na.rm = TRUE),
+    total_density = sum(whale_density, na.rm = TRUE),
+    .groups       = "drop") |>
+  mutate(area_label = factor(area_label,
+    levels = c("Study Area", "Critical Habitat",
+               paste("Subarea", 1:7)))) |>
+  arrange(area_label)
+
+whale_by_area |>
+  kable(
+    digits    = 4,
+    col.names = c("Area", "Cells", "Mean Density", "Total Density"))
 ```
 
 ### D3: Risk by Area (Unweighted)
 
+Base risk = whale density × traffic distance (no speed weighting).
+
 ```{r}
 #| label: tbl-risk-unweighted
-#| eval: false
 
-# TODO: base risk (whale x traffic, no speed weighting)
+risk_by_area |>
+  calc_area_contribution(risk_col = "total_base_risk") |>
+  select(area_label, total_base_risk, contribution_pct) |>
+  kable(
+    digits    = c(0, 2, 1),
+    col.names = c("Area", "Base Risk", "% of Total"),
+    format.args = list(big.mark = ","))
 ```
 
 ### D4: Risk by Area (Speed-Weighted)
 
+Speed-weighted risk using Conn & Silber (2013) factors.
+
 ```{r}
 #| label: tbl-risk-weighted
-#| eval: false
 
-# TODO: Conn/Silber weighted risk
+risk_by_area |>
+  calc_area_contribution(risk_col = "total_speed_weighted_risk") |>
+  select(area_label, total_speed_weighted_risk, contribution_pct) |>
+  kable(
+    digits    = c(0, 2, 1),
+    col.names = c("Area", "Speed-Weighted Risk", "% of Total"),
+    format.args = list(big.mark = ","))
 ```
 
 ### D5: Risk Reduction Scenarios
 
+Risk reduction if all vessels slowed to ≤10 kt (baseline Conn/Silber factor = 1.0).
+
 ```{r}
 #| label: tbl-risk-reduction
-#| eval: false
 
-# TODO: risk reduction from slowdown scenarios
+risk_by_area |>
+  select(area_label, total_speed_weighted_risk, total_slowdown_risk,
+         risk_reduction_abs, risk_reduction_pct) |>
+  kable(
+    digits    = c(0, 2, 2, 2, 1),
+    col.names = c("Area", "Current Risk", "Slowdown Risk",
+                  "Reduction", "Reduction %"),
+    format.args = list(big.mark = ","))
 ```
 
 ### D7: Company-Specific Results
 
+Per-company risk and potential reduction from fleet-wide slowdown to ≤10 kt.
+
 ```{r}
 #| label: tbl-company-risk
-#| eval: false
 
-# TODO: per-company risk and reduction
+# query traffic by cell, speed bin, and company
+company_traffic_sql <- glue("
+  SELECT
+    sc.cell_id,
+    co.company,
+    {get_speed_bin_sql()} AS speed_bin,
+    SUM(sc.dist_travelled_km) AS total_km
+  FROM ship_cell sc
+  JOIN ship s ON sc.mmsi = s.mmsi
+  JOIN company co ON s.operator ILIKE '%' || co.operator_lookup || '%'
+  WHERE sc.avg_speed_knots IS NOT NULL
+  GROUP BY sc.cell_id, co.company, speed_bin
+")
+
+company_traffic <- DBI::dbGetQuery(con, company_traffic_sql)
+
+# join with whale density and compute risk
+company_risk_data <- company_traffic |>
+  inner_join(whale_annual, by = "cell_id") |>
+  mutate(
+    traffic   = total_km,
+    speed_bin = factor(speed_bin, levels = RISK_FACTORS$labels))
+
+# summarize by company
+company_risk <- summarize_risk_by_area(
+  company_risk_data,
+  area_col = "company",
+  verbose  = FALSE)
+
+company_risk |>
+  arrange(desc(total_speed_weighted_risk)) |>
+  kable(
+    digits    = c(0, 2, 2, 2, 2, 1),
+    col.names = c("Company", "Base Risk", "Speed-Weighted Risk",
+                  "Slowdown Risk", "Reduction", "Reduction %"),
+    format.args = list(big.mark = ","))
 ```
 
 ## Cleanup

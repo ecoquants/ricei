@@ -44,6 +44,10 @@ load_spatial(con_goa)
 
 # dbListTables(con_gfw)
 # dbListTables(con_goa)
+# "cell"      "company"   "goa"       "ship"      "ship_cell"
+# v_lon <- tbl(con_goa, "cell") |> distinct(cell_ll_lon) |> arrange(cell_ll_lon) |> pull(cell_ll_lon) 
+# diff(v_lon) |> min() # 0.1
+
 ```
 
 ## Read Whale Density Hexagons
@@ -243,6 +247,8 @@ librarian::shelf(
 # bq_tbl <- bq_table(project_id, dataset_id, table_id)
 
 # new: download from bigquery ----
+
+# assumes benbest@ucsd.edu has been granted access
 
 # mem.maxVSize()
 # [1] 24576 # Mb

@@ -3,6 +3,19 @@ output:
   word_document: default
   html_document: default
 ---
+
+<!-- 
+PROMPT: Help me come up with a planning document TODO.md in the next 2 weeks to 
+complete the contract with analyses and deliverables described in 
+@contract.md 
+(created from: `cd '~/My Drive/contracts/ricei '25'; pandoc -f docx -t markdown -o contract.md contract.docx`), 
+given existing work from @goa.qmd, the Shiny app @app_company/ and the 
+previously referenced report at @index.qmd. I will need to intersect whale 
+densities with ship presence using available parameters from ship on weight and 
+length in a way as to inform on minimizing impacts and report out for specific 
+subareas.
+-->
+
 # Rice's Whale Ship-Strike Risk Analysis
 
 **NRDC Contract - Statement of Work Implementation Plan**
