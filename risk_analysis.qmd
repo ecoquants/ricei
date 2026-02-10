@@ -17,13 +17,14 @@ editor_options:
   chunk_output_type: console
 ---
 
-```{r setup}
+```{r}
 #| label: setup
 
 # load libraries ----
 librarian::shelf(
-  DBI, dplyr, duckdb, glue, here, janitor, knitr, leaflet, leaflet.extras,
-  lubridate, purrr, sf, stringr, terra, tibble, tidyr, viridisLite,
+  DBI, dplyr, duckdb, ggplot2, glue, here, janitor, knitr, leaflet,
+  leaflet.extras, lubridate, purrr, scales, sf, stringr, terra, tibble,
+  tidyr, viridisLite,
   quiet = TRUE
 )
 
@@ -374,6 +375,364 @@ risk_by_area <- risk_by_area |>
 risk_by_area |> kable(digits = 2)
 ```
 
+## Phase 3: Garrison et al. (2025) Lethality-Curve Risk
+
+This section adds a continuous P(lethality | speed, vessel_size) approach from Garrison et al. (2025), as implemented in [SEFSC/VesselStrikeRiskModel](https://github.com/SEFSC/VesselStrikeRiskModel). Unlike the Conn & Silber (2013) discrete speed bins, this GLM produces a smooth lethality curve that also accounts for vessel size class.
+
+**Simplified formula:**
+
+$$\text{Risk}_\text{Garrison} = \text{whale\_density} \times \text{dist\_km} \times P(\text{lethality} \mid \text{speed}, \text{vessel\_size})$$
+
+::: {.callout-note collapse="true"}
+## Caveats
+
+The full Blondin et al. (2025) encounter-to-mortality model computes:
+
+$$\text{Mortality} = \text{EncounterRate} \times P(\text{surface}) \times P(\text{strike}) \times P(\text{lethality}) \times (1 - P(\text{avoidance}))$$
+
+We implement **only P(lethality)** because we lack:
+
+- **Encounter rate model** — requires individual vessel track geometry (we have cell-aggregated transits)
+- **P(surface)** — requires Rice's whale dive profile data (only 1 tagged whale: Kok et al. 2023)
+- **P(avoidance)** — requires species-specific reaction parameters not yet available for Rice's whale
+
+Additional notes:
+
+- The Garrison GLM was fit on NARW + other large whale strike data, not Rice's whale specifically
+- Rice's whale is modeled as `spe.HB = "Not Humpback"` (appropriate given it is not a humpback)
+- Vessels with missing `length_m` default to class "L" (most common for AIS-tracked commercial vessels)
+- We use `avg_speed_knots` per cell transit, not instantaneous speed
+:::
+
+### 3.0 Load Garrison GLM
+
+```{r}
+#| label: garrison-load-glm
+
+garrison_glm <- get_garrison_glm()
+
+cat("Garrison lethality GLM summary:\n")
+cat("  Family:", family(garrison_glm)$family, "\n")
+cat("  Link:  ", family(garrison_glm)$link, "\n")
+cat("  AIC:   ", AIC(garrison_glm), "\n\n")
+cat("Coefficients:\n")
+print(coef(garrison_glm))
+```
+
+### 3.1 Vessel Size Distribution
+
+```{r}
+#| label: garrison-vessel-sizes
+
+# deduplicate ships by mmsi (most recent record)
+vessel_size_sql <- glue("
+  WITH ship_dedup AS (
+    SELECT *, ROW_NUMBER() OVER (
+      PARTITION BY mmsi ORDER BY updated_date DESC
+    ) AS rn
+    FROM ship
+  )
+  SELECT
+    (s.length_m IS NOT NULL) AS has_length,
+    {get_vessel_size_sql()} AS vessel_size,
+    COUNT(DISTINCT sc.mmsi) AS n_ships,
+    SUM(sc.dist_travelled_km) AS total_km
+  FROM ship_cell sc
+  LEFT JOIN ship_dedup s ON sc.mmsi = s.mmsi AND s.rn = 1
+  WHERE sc.avg_speed_knots IS NOT NULL
+  GROUP BY has_length, vessel_size
+  ORDER BY vessel_size
+", .open = "{", .close = "}")
+
+# note: LEFT JOIN keeps ship_cell rows even without ship metadata
+vessel_sizes <- DBI::dbGetQuery(con, vessel_size_sql)
+
+# summarize by vessel size class
+vessel_size_summary <- vessel_sizes |>
+  group_by(vessel_size) |>
+  summarize(
+    n_ships  = sum(n_ships),
+    total_km = sum(total_km),
+    .groups  = "drop") |>
+  mutate(
+    pct_ships = n_ships / sum(n_ships) * 100,
+    pct_km    = total_km / sum(total_km) * 100)
+
+# report coverage: vessels with known length_m
+total_km <- sum(vessel_sizes$total_km)
+known_km <- vessel_sizes |>
+  filter(has_length) |>
+  pull(total_km) |> sum()
+cat(glue(
+  "Vessel length coverage: {round(known_km/total_km*100, 1)}% of ",
+  "ship_cell traffic km from vessels with known length_m\n\n"))
+
+vessel_size_summary |>
+  kable(
+    digits    = c(0, 0, 0, 1, 1),
+    col.names = c("Vessel Size", "Ships", "Total km", "% Ships", "% km"),
+    format.args = list(big.mark = ","))
+```
+
+### 3.2 Lethality Curve Plot
+
+```{r}
+#| label: garrison-lethality-curve
+#| fig-cap: "Garrison et al. (2025) P(lethality) as a function of vessel speed, by vessel size class. Vertical dashed line marks the 10-kt slowdown target."
+
+# generate prediction grid: speeds 0–25 kt × 4 size classes
+speed_grid <- expand.grid(
+  speed       = seq(0, 25, by = 0.5),
+  vessel_size = c("S", "M", "L", "XL"))
+
+speed_grid$p_lethal <- calc_p_lethal_garrison(
+  speed_knots = speed_grid$speed,
+  vessel_size = speed_grid$vessel_size,
+  glm_model   = garrison_glm)
+
+# order vessel_size factor for legend
+speed_grid$vessel_size <- factor(
+  speed_grid$vessel_size,
+  levels = c("S", "M", "L", "XL"))
+
+ggplot2::ggplot(speed_grid, ggplot2::aes(
+    x = speed, y = p_lethal, color = vessel_size)) +
+  ggplot2::geom_line(linewidth = 1) +
+  ggplot2::geom_vline(xintercept = 10, linetype = "dashed", color = "gray40") +
+  ggplot2::annotate("text", x = 10.5, y = 0.05, label = "10 kt slowdown",
+                    hjust = 0, color = "gray40", size = 3) +
+  ggplot2::scale_color_manual(
+    values = c(S = "#2166ac", M = "#67a9cf", L = "#ef8a62", XL = "#b2182b"),
+    name   = "Vessel Size") +
+  ggplot2::scale_y_continuous(limits = c(0, 1), labels = scales::percent) +
+  ggplot2::labs(
+    x = "Vessel Speed (knots)",
+    y = "P(lethality)") +
+  ggplot2::theme_minimal()
+```
+
+### 3.3 Garrison Traffic Query
+
+```{r}
+#| label: garrison-traffic-query
+
+# query per-record traffic with vessel size classification
+garrison_traffic_sql <- glue("
+  WITH ship_dedup AS (
+    SELECT *, ROW_NUMBER() OVER (
+      PARTITION BY mmsi ORDER BY updated_date DESC
+    ) AS rn
+    FROM ship
+  )
+  SELECT
+    sc.cell_id,
+    sc.mmsi,
+    sc.avg_speed_knots,
+    sc.dist_travelled_km,
+    {get_vessel_size_sql()} AS vessel_size
+  FROM ship_cell sc
+  LEFT JOIN ship_dedup s ON sc.mmsi = s.mmsi AND s.rn = 1
+  WHERE sc.avg_speed_knots IS NOT NULL
+", .open = "{", .close = "}")
+
+garrison_traffic <- DBI::dbGetQuery(con, garrison_traffic_sql)
+
+cat("Garrison traffic records:", format(nrow(garrison_traffic), big.mark = ","),
+    "| Cells:", n_distinct(garrison_traffic$cell_id),
+    "| Vessels:", n_distinct(garrison_traffic$mmsi), "\n")
+```
+
+### 3.4 Compute P(lethality) and Risk
+
+```{r}
+#| label: garrison-compute-risk
+
+# compute P(lethality) at current speed and at 10-kt slowdown
+garrison_traffic <- garrison_traffic |>
+  mutate(
+    p_lethal      = calc_p_lethal_garrison(
+      avg_speed_knots, vessel_size, garrison_glm),
+    speed_slow    = pmin(avg_speed_knots, 10),
+    p_lethal_slow = calc_p_lethal_garrison(
+      speed_slow, vessel_size, garrison_glm) )
+
+# join with whale density
+garrison_risk <- garrison_traffic |>
+  inner_join(whale_annual, by = "cell_id") |>
+  mutate(
+    traffic              = dist_travelled_km,
+    garrison_risk        = whale_density * dist_travelled_km * p_lethal,
+    garrison_slowdown_risk = whale_density * dist_travelled_km * p_lethal_slow)
+
+cat("Records with whale overlap:", format(nrow(garrison_risk), big.mark = ","),
+    "| Cells:", n_distinct(garrison_risk$cell_id), "\n")
+cat("Total Garrison risk:  ", format(sum(garrison_risk$garrison_risk), big.mark = ","), "\n")
+cat("Total slowdown risk:  ", format(sum(garrison_risk$garrison_slowdown_risk), big.mark = ","), "\n")
+```
+
+### 3.5 Risk by Area (Garrison)
+
+```{r}
+#| label: garrison-risk-by-area
+
+# join with area lookup and summarize
+garrison_area_data <- garrison_risk |>
+  inner_join(area_long, by = "cell_id", relationship = "many-to-many")
+
+garrison_by_area <- summarize_garrison_risk(
+  garrison_area_data,
+  area_col = "area_label",
+  verbose  = FALSE)
+
+# order areas
+garrison_by_area <- garrison_by_area |>
+  mutate(area_label = factor(area_label, levels = area_order)) |>
+  arrange(area_label)
+
+garrison_by_area |>
+  kable(
+    digits      = c(0, 2, 4, 4, 4, 1),
+    col.names   = c("Area", "Base Risk", "Garrison Risk",
+                     "Slowdown Risk", "Reduction", "Reduction %"),
+    format.args = list(big.mark = ","))
+```
+
+### 3.6 Garrison Risk Map (D1c-g)
+
+```{r}
+#| label: map-garrison-risk
+#| fig-cap: "Garrison et al. (2025) lethality-weighted ship-strike risk. Risk = whale density × vessel km × P(lethality | speed, vessel size)."
+
+# aggregate to per-cell totals
+garrison_per_cell <- garrison_risk |>
+  group_by(cell_id) |>
+  summarize(risk = sum(garrison_risk, na.rm = TRUE), .groups = "drop")
+
+r_garrison_risk <- terra::init(r_template, NA)
+r_garrison_risk[garrison_per_cell$cell_id] <- garrison_per_cell$risk
+names(r_garrison_risk) <- "garrison_risk"
+
+map_rast_simple(
+  r             = r_garrison_risk,
+  legend_title  = "Garrison Risk<br><small>(P(lethal) weighted)</small>",
+  colors        = "YlOrRd",
+  group         = "garrison_risk",
+  overlay_sf    = ply_crithab,
+  overlay_color = "blue",
+  overlay_label = "Critical Habitat")
+```
+
+### 3.7 Garrison Risk Reduction (D5-g)
+
+```{r}
+#| label: tbl-garrison-reduction
+
+garrison_by_area |>
+  select(area_label, total_garrison_risk, total_slowdown_risk,
+         risk_reduction_abs, risk_reduction_pct) |>
+  kable(
+    digits      = c(0, 4, 4, 4, 1),
+    col.names   = c("Area", "Current Risk", "Slowdown Risk",
+                     "Reduction", "Reduction %"),
+    format.args = list(big.mark = ","))
+```
+
+### 3.8 Company Garrison Risk (D7-g)
+
+```{r}
+#| label: garrison-company-risk
+
+# query per-record traffic with vessel size + company
+garrison_company_sql <- glue("
+  WITH ship_dedup AS (
+    SELECT *, ROW_NUMBER() OVER (
+      PARTITION BY mmsi ORDER BY updated_date DESC
+    ) AS rn
+    FROM ship
+  )
+  SELECT
+    sc.cell_id,
+    sc.mmsi,
+    co.company,
+    sc.avg_speed_knots,
+    sc.dist_travelled_km,
+    {get_vessel_size_sql()} AS vessel_size
+  FROM ship_cell sc
+  LEFT JOIN ship_dedup s ON sc.mmsi = s.mmsi AND s.rn = 1
+  JOIN company co ON s.operator ILIKE '%' || co.operator_lookup || '%'
+  WHERE sc.avg_speed_knots IS NOT NULL
+", .open = "{", .close = "}")
+
+garrison_company <- DBI::dbGetQuery(con, garrison_company_sql)
+
+# compute P(lethality) and risk
+garrison_company <- garrison_company |>
+  mutate(
+    p_lethal      = calc_p_lethal_garrison(
+      avg_speed_knots, vessel_size, garrison_glm),
+    speed_slow    = pmin(avg_speed_knots, 10),
+    p_lethal_slow = calc_p_lethal_garrison(
+      speed_slow, vessel_size, garrison_glm) )
+
+garrison_company_risk <- garrison_company |>
+  inner_join(whale_annual, by = "cell_id") |>
+  mutate(
+    traffic                = dist_travelled_km,
+    garrison_risk          = whale_density * dist_travelled_km * p_lethal,
+    garrison_slowdown_risk = whale_density * dist_travelled_km * p_lethal_slow)
+
+# summarize by company
+company_garrison <- summarize_garrison_risk(
+  garrison_company_risk,
+  area_col = "company",
+  verbose  = FALSE)
+
+company_garrison |>
+  arrange(desc(total_garrison_risk)) |>
+  kable(
+    digits      = c(0, 2, 4, 4, 4, 1),
+    col.names   = c("Company", "Base Risk", "Garrison Risk",
+                     "Slowdown Risk", "Reduction", "Reduction %"),
+    format.args = list(big.mark = ","))
+```
+
+### 3.9 Comparison: Conn/Silber vs Garrison
+
+```{r}
+#| label: garrison-comparison
+
+# build side-by-side comparison
+comparison <- risk_by_area |>
+  select(
+    area_label,
+    cs_risk     = total_speed_weighted_risk,
+    cs_slowdown = total_slowdown_risk,
+    cs_red_pct  = risk_reduction_pct) |>
+  inner_join(
+    garrison_by_area |>
+      select(
+        area_label,
+        g_risk     = total_garrison_risk,
+        g_slowdown = total_slowdown_risk,
+        g_red_pct  = risk_reduction_pct),
+    by = "area_label")
+
+comparison |>
+  kable(
+    digits    = c(0, 2, 2, 1, 4, 4, 1),
+    col.names = c(
+      "Area",
+      "C/S Risk", "C/S Slowdown", "C/S Reduction %",
+      "Garrison Risk", "Garrison Slowdown", "Garrison Reduction %"),
+    format.args = list(big.mark = ","))
+```
+
+The Conn & Silber (2013) approach uses discrete speed-bin multipliers (1.0–10.8×), while the Garrison et al. (2025) GLM produces a continuous lethality probability that also depends on vessel size. Key differences:
+
+- **Garrison risk reduction is generally smaller** for areas dominated by large/XL vessels, because P(lethality) for large vessels remains elevated even at low speeds
+- **The two methods agree directionally**: slowdown to 10 kt reduces risk in all areas under both models
+- **Garrison provides finer resolution**: vessels of different sizes in the same speed bin receive different risk weights
+
 ## Deliverable Maps
 
 ### D1a: Rice's Whale Densities (Annual Average)
@@ -681,7 +1040,10 @@ DBI::dbDisconnect(con, shutdown = TRUE)
 
 - Best (unpub.) - Previous ship-strike risk analysis for Rice's whale
 - Benioff Ocean Science Laboratory (unpub.) - 2023 AIS analysis
+- Blondin, H., et al. (2025). Vessel strike mortality model framework for large whales. In review.
 - Conn, P.B. & Silber, G.K. (2013). Vessel speed restrictions reduce risk of collision-related mortality for North Atlantic right whales. *Ecosphere* 4(4):43.
+- Garrison, L.P., et al. (2025). Lethality curve GLM for vessel strikes on large whales. [SEFSC/VesselStrikeRiskModel](https://github.com/SEFSC/VesselStrikeRiskModel).
+- Kok, A.C.M., et al. (2023). Dive behavior of Rice's whale from a single satellite tag. *Marine Mammal Science* 39(4):1264-1274.
 - Litz, J.A., et al. (2022). Rice's whale (*Balaenoptera ricei*) spatial distribution, abundance, and status. *Marine Mammal Science* 38:1430-1451.
 - NMFS (2020). Endangered Species Act biological opinion on the federally regulated oil and gas program activities in the Gulf of Mexico.
 - NMFS (2023). Proposed rule to designate critical habitat for Rice's whale. 88 FR 47453.

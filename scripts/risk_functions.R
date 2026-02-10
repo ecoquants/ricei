@@ -147,6 +147,86 @@ get_risk_factor_sql <- function() {
   END"
 }
 
+# Garrison et al. (2025) lethality-curve functions ----
+
+GARRISON_GLM_URL <- "https://github.com/SEFSC/VesselStrikeRiskModel/raw/main/Data/LethalityCurveGLM_26Apr24.RDS"
+
+#' Download and cache the Garrison et al. (2025) lethality GLM
+#' @param data_dir Directory to store RDS file
+#' @param verbose Show debug messages
+#' @return GLM model object
+get_garrison_glm <- function(data_dir = here::here("data"), verbose = interactive()) {
+  rds_path <- file.path(data_dir, "LethalityCurveGLM_26Apr24.RDS")
+  if (!file.exists(rds_path)) {
+    if (verbose) message("[get_garrison_glm] Downloading GLM from SEFSC GitHub...")
+    download.file(GARRISON_GLM_URL, rds_path, mode = "wb")
+  }
+  readRDS(rds_path)
+}
+
+#' Classify vessel length into Garrison size categories
+#' @param length_m Numeric vector of vessel lengths in meters
+#' @param default Default size class for NA lengths
+#' @return Character vector of size classes (S/M/L/XL)
+assign_vessel_size <- function(length_m, default = "L") {
+  dplyr::case_when(
+    is.na(length_m)    ~ default,
+    length_m >= 106.68 ~ "XL",
+    length_m >= 19.812 ~ "L",
+    length_m >= 12.192 ~ "M",
+    TRUE               ~ "S"
+  )
+}
+
+#' Get vessel size SQL CASE expression for DuckDB
+#' @return SQL CASE expression string
+get_vessel_size_sql <- function() {
+  "CASE
+    WHEN s.length_m IS NULL    THEN 'L'
+    WHEN s.length_m >= 106.68  THEN 'XL'
+    WHEN s.length_m >= 19.812  THEN 'L'
+    WHEN s.length_m >= 12.192  THEN 'M'
+    ELSE 'S'
+  END"
+}
+
+#' Calculate P(lethality) using the Garrison GLM
+#' @param speed_knots Numeric vector of vessel speeds in knots
+#' @param vessel_size Character vector of size classes (S/M/L/XL)
+#' @param glm_model GLM object from get_garrison_glm()
+#' @param species Species category (default "Not Humpback")
+#' @return Numeric vector of P(lethality) values [0,1]
+calc_p_lethal_garrison <- function(speed_knots, vessel_size, glm_model,
+                                    species = "Not Humpback") {
+  newdata <- data.frame(
+    Vess.Speed = speed_knots,
+    vess.cat_f = vessel_size,
+    spe.HB     = species)
+  predict(glm_model, newdata = newdata, se.fit = FALSE, type = "response")
+}
+
+#' Summarize Garrison risk by geographic area
+#' @param risk_data Data frame with garrison_risk and garrison_slowdown_risk
+#' @param area_col Name of area column
+#' @param verbose Show debug messages
+#' @return Data frame with risk summaries by area
+summarize_garrison_risk <- function(risk_data, area_col = "area_label",
+                                     verbose = interactive()) {
+  if (verbose) message("[summarize_garrison_risk] Calculating risk for column: ", area_col)
+
+  risk_data |>
+    dplyr::group_by(dplyr::across(dplyr::all_of(area_col))) |>
+    dplyr::summarize(
+      total_base_risk     = sum(whale_density * traffic, na.rm = TRUE),
+      total_garrison_risk = sum(garrison_risk, na.rm = TRUE),
+      total_slowdown_risk = sum(garrison_slowdown_risk, na.rm = TRUE),
+      risk_reduction_abs  = total_garrison_risk - total_slowdown_risk,
+      risk_reduction_pct  = ifelse(
+        total_garrison_risk > 0,
+        (risk_reduction_abs / total_garrison_risk) * 100, 0),
+      .groups = "drop")
+}
+
 # whale data processing functions ----
 
 #' Create canonical raster template from goa.geojson bounding box

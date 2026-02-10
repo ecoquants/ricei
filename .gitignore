@@ -11,5 +11,6 @@ _test_files
 tmp
 CLAUDE.md
 contract.md
+data/LethalityCurveGLM_26Apr24.RDS
 TODO.docx
 TODO.html
