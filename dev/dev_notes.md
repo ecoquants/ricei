@@ -1,3 +1,13 @@
+## 2026-02-18 whale, risk into ships app
+
+Come up with a plan for integrating the whale densities (by month or annual average) with the ships app @app_risk. 
+
+
+
+## 2026-02-18 other parameters from Blondin et al (2025)
+
+Evaluate if any other parameters can be used in `@risk_analysis.qmd` from Blondin et al. (2025) (article: `@docs/Blondin et al. - 2025 - Vessel strike encounter risk model informs mortali.pdf`; discussion: `@docs/risk-model-Blondin-2025.pdf`; related code: `@~/Github/SEFSC/VesselStrikeRiskModel`).
+
 ## 2026-02-04b import whale densities
 
 I see the problem now. When creating the raster from the database values, I filled `cell_id` by row_number() in @goa.qmd:
