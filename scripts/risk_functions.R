@@ -227,6 +227,68 @@ summarize_garrison_risk <- function(risk_data, area_col = "area_label",
       .groups = "drop")
 }
 
+# Kok et al. (2023) Rice's whale dive profile functions ----
+
+#' Get P(surface) estimates for Rice's whale from Kok et al. (2023)
+#'
+#' Returns cumulative proportion of time Rice's whales spent at or above each
+#' depth threshold, digitized from Kok et al. (2023) Fig. 5 cumulative % time
+#' dotted lines using WebPlotDigitizer. Includes both tagged whales:
+#' Milky Way (2015) and Edna (2018). The 30 m row is extrapolated from the
+#' 15-to-20 m per-meter rate. Averages across whales are used in analysis.
+#'
+#' @param verbose Show informational messages
+#' @return tibble with columns: depth_m, vessel_sizes,
+#'   milky_way_day, milky_way_night, edna_day, edna_night,
+#'   avg_day, avg_night, method
+get_p_surface_riceswhale <- function(verbose = interactive()) {
+
+  if (verbose) message(
+    "[get_p_surface_riceswhale] Returning Kok et al. (2023) Fig. 5 ",
+    "digitized values (n=2 whales: Milky Way 2015, Edna 2018)")
+
+  # cumulative % time at or above depth, digitized from Fig. 5 dotted lines
+  # using WebPlotDigitizer (automeris.io/WebPlotDigitizer)
+  measured <- tibble::tibble(
+    depth_m         = c( 5,   15,   20),
+    milky_way_night = c(65,   85,   89) / 100,
+    milky_way_day   = c(34,   41,   43) / 100,
+    edna_night      = c(72,   85,   87) / 100,
+    edna_day        = c(34,   39,   40) / 100,
+    method          = "WebPlotDigitizer, Kok et al. (2023) Fig. 5"
+  )
+
+  # extrapolate to 30 m using per-meter rate from 15→20 m
+  r15 <- measured |> dplyr::filter(depth_m == 15)
+  r20 <- measured |> dplyr::filter(depth_m == 20)
+  extrapolated <- tibble::tibble(
+    depth_m         = 30,
+    milky_way_night = pmin(r20$milky_way_night + (r20$milky_way_night - r15$milky_way_night) / 5 * 10, 1),
+    milky_way_day   = pmin(r20$milky_way_day   + (r20$milky_way_day   - r15$milky_way_day)   / 5 * 10, 1),
+    edna_night      = pmin(r20$edna_night      + (r20$edna_night      - r15$edna_night)      / 5 * 10, 1),
+    edna_day        = pmin(r20$edna_day        + (r20$edna_day        - r15$edna_day)        / 5 * 10, 1),
+    method          = "Extrapolated from 15-20 m trend"
+  )
+
+  # combine and compute averages across whales
+  dplyr::bind_rows(measured, extrapolated) |>
+    dplyr::mutate(
+      avg_night    = (milky_way_night + edna_night) / 2,
+      avg_day      = (milky_way_day   + edna_day)   / 2,
+      vessel_sizes = dplyr::case_when(
+        depth_m ==  5 ~ "S/M/L (depth.lim = 5 m)",
+        depth_m == 15 ~ "XL (depth.lim = 15 m)",
+        depth_m == 20 ~ "(reference depth)",
+        depth_m == 30 ~ "(extrapolated)"
+      )
+    ) |>
+    dplyr::select(
+      depth_m, vessel_sizes,
+      milky_way_day, milky_way_night,
+      edna_day, edna_night,
+      avg_day, avg_night, method)
+}
+
 # whale data processing functions ----
 
 #' Create canonical raster template from goa.geojson bounding box

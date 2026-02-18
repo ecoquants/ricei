@@ -1,8 +1,10 @@
 ---
 title: "Rice's Whale Ship-Strike Risk Analysis"
-subtitle: "NRDC Contract - 2023 AIS Data Analysis"
-author: "Ben Best, EcoQuants LLC"
+author: "Ben Best, EcoQuants LLC for NRDC"
 date: today
+bibliography: ricei.bib
+nocite: |
+  @nmfsBiologicalOpinionFederally2020, @nmfsProposedRuleCriticalHabitat2023
 format:
   html:
     toc: true
@@ -49,13 +51,13 @@ DBI::dbExecute(con, "INSTALL spatial; LOAD spatial;")
 
 This analysis calculates ship-strike risk for Rice's whale (*Balaenoptera ricei*) in the Gulf of Mexico, using:
 
-- **Whale densities:** Litz et al. (2022) hexagonal grid model
-- **Vessel traffic:** 2023 AIS data from Benioff Ocean Science Laboratory
-- **Risk model:** Conn & Silber (2013) speed-based risk factors
+- **Whale densities:** @litzCetaceanSeaTurtle2022 hexagonal grid model
+- **Vessel traffic:** 2023 AIS data from @benioffAISAnalysis2023
+- **Risk model:** @connVesselSpeedRestrictions2013 speed-based risk factors
 
 ### Risk Factor Model
 
-Based on Conn & Silber (2013), strike risk increases non-linearly with vessel speed:
+Based on @connVesselSpeedRestrictions2013, strike risk increases non-linearly with vessel speed:
 ```{r}
 #| label: risk-factors-table
 
@@ -138,7 +140,7 @@ ply_whales <- sf::st_read(here("data/whales.geojson"), quiet = TRUE)
 
 ### 1.2 Import Whale Densities
 
-Import the 2021 Rice's whale density data (Litz et al. 2022) into DuckDB tables using direct rasterization:
+Import the 2021 Rice's whale density data [@litzCetaceanSeaTurtle2022] into DuckDB tables using direct rasterization:
 
 - `whale`: metadata for each month/metric combination
 - `whale_cell`: cell-level density values matching the vessel grid
@@ -377,7 +379,7 @@ risk_by_area |> kable(digits = 2)
 
 ## Phase 3: Garrison et al. (2025) Lethality-Curve Risk
 
-This section adds a continuous P(lethality | speed, vessel_size) approach from Garrison et al. (2025), as implemented in [SEFSC/VesselStrikeRiskModel](https://github.com/SEFSC/VesselStrikeRiskModel). Unlike the Conn & Silber (2013) discrete speed bins, this GLM produces a smooth lethality curve that also accounts for vessel size class.
+This section adds a continuous P(lethality | speed, vessel_size) approach from @garrisonLethalityCurveGLM2025, as implemented in [SEFSC/VesselStrikeRiskModel](https://github.com/SEFSC/VesselStrikeRiskModel). Unlike the @connVesselSpeedRestrictions2013 discrete speed bins, this GLM produces a smooth lethality curve that also accounts for vessel size class.
 
 **Simplified formula:**
 
@@ -386,14 +388,14 @@ $$\text{Risk}_\text{Garrison} = \text{whale\_density} \times \text{dist\_km} \ti
 ::: {.callout-note collapse="true"}
 ## Caveats
 
-The full Blondin et al. (2025) encounter-to-mortality model computes:
+The full @blondinVesselStrikeMortality2025 encounter-to-mortality model computes:
 
 $$\text{Mortality} = \text{EncounterRate} \times P(\text{surface}) \times P(\text{strike}) \times P(\text{lethality}) \times (1 - P(\text{avoidance}))$$
 
 We implement **only P(lethality)** because we lack:
 
 - **Encounter rate model** — requires individual vessel track geometry (we have cell-aggregated transits)
-- **P(surface)** — requires Rice's whale dive profile data (only 1 tagged whale: Kok et al. 2023)
+- **P(surface)** — requires Rice's whale dive profile data [only 1 tagged whale; @kokDiveBehaviorRicesWhale2023]
 - **P(avoidance)** — requires species-specific reaction parameters not yet available for Rice's whale
 
 Additional notes:
@@ -402,6 +404,8 @@ Additional notes:
 - Rice's whale is modeled as `spe.HB = "Not Humpback"` (appropriate given it is not a humpback)
 - Vessels with missing `length_m` default to class "L" (most common for AIS-tracked commercial vessels)
 - We use `avg_speed_knots` per cell transit, not instantaneous speed
+
+See **Phase 4** for a comprehensive evaluation of all Blondin model parameters and a diel risk scenario analysis using the single available Rice's whale dive profile.
 :::
 
 ### 3.0 Load Garrison GLM
@@ -478,7 +482,7 @@ vessel_size_summary |>
 
 ```{r}
 #| label: garrison-lethality-curve
-#| fig-cap: "Garrison et al. (2025) P(lethality) as a function of vessel speed, by vessel size class. Vertical dashed line marks the 10-kt slowdown target."
+#| fig-cap: "@garrisonLethalityCurveGLM2025 P(lethality) as a function of vessel speed, by vessel size class. Vertical dashed line marks the 10-kt slowdown target."
 
 # generate prediction grid: speeds 0–25 kt × 4 size classes
 speed_grid <- expand.grid(
@@ -601,7 +605,7 @@ garrison_by_area |>
 
 ```{r}
 #| label: map-garrison-risk
-#| fig-cap: "Garrison et al. (2025) lethality-weighted ship-strike risk. Risk = whale density × vessel km × P(lethality | speed, vessel size)."
+#| fig-cap: "@garrisonLethalityCurveGLM2025 lethality-weighted ship-strike risk. Risk = whale density × vessel km × P(lethality | speed, vessel size)."
 
 # aggregate to per-cell totals
 garrison_per_cell <- garrison_risk |>
@@ -727,21 +731,332 @@ comparison |>
     format.args = list(big.mark = ","))
 ```
 
-The Conn & Silber (2013) approach uses discrete speed-bin multipliers (1.0–10.8×), while the Garrison et al. (2025) GLM produces a continuous lethality probability that also depends on vessel size. Key differences:
+The @connVesselSpeedRestrictions2013 approach uses discrete speed-bin multipliers (1.0–10.8×), while the @garrisonLethalityCurveGLM2025 GLM produces a continuous lethality probability that also depends on vessel size. Key differences:
 
 - **Garrison risk reduction is generally smaller** for areas dominated by large/XL vessels, because P(lethality) for large vessels remains elevated even at low speeds
 - **The two methods agree directionally**: slowdown to 10 kt reduces risk in all areas under both models
 - **Garrison provides finer resolution**: vessels of different sizes in the same speed bin receive different risk weights
 
+## Phase 4: Blondin et al. (2025) Full Model Parameter Evaluation
+
+The full @blondinVesselStrikeMortality2025 encounter-to-mortality model estimates annual vessel-strike mortality as:
+
+$$M_\text{year} = \sum_{i,j,k} \lambda_{ijk} \times P(\text{strike\_depth}) \times (1 - P(\text{avoid})) \times P(\text{lethality}) \times N_w$$
+
+where $\lambda_{ijk}$ is the encounter rate for vessel $i$ in cell $j$ during month $k$, $P(\text{strike\_depth})$ is the probability the whale is within the vessel's strike zone, $P(\text{avoid})$ is the probability the whale avoids the strike through vertical descent, $P(\text{lethality})$ is the probability the strike is lethal (from the Garrison GLM), and $N_w$ is whale abundance.
+
+Our Phase 3 analysis implements **only P(lethality)**, multiplied by whale density and vessel distance as a co-occurrence proxy. This section evaluates all parameters in the Blondin framework to document what is feasible for Rice's whale and what data gaps remain.
+
+### 4.1 Parameter Evaluation Summary
+
+```{r}
+#| label: blondin-parameter-table
+
+param_eval <- tibble::tibble(
+  Parameter = c(
+    "P(lethality | speed, vessel_size)",
+    "Whale density (N_w)",
+    "Vessel traffic (AIS)",
+    "Vessel size classification",
+    "Vessel draft & strike zone",
+    "P(whale at strike depth)",
+    "Encounter rate (λ)",
+    "P(avoidance)",
+    "Bathymetry (bottom depth)",
+    "Whale height",
+    "Small vessel AIS correction",
+    "Monthly temporal resolution",
+    "Diel (day/night) risk scenarios"
+  ),
+  Status = c(
+    "\u2705 Implemented",
+    "\u2705 Implemented",
+    "\u2705 Implemented",
+    "\u2705 Implemented",
+    "\u26a0\ufe0f Feasible to estimate",
+    "\u26a0\ufe0f Very limited data",
+    "\u274c Not feasible",
+    "\u274c No Rice's whale data",
+    "\u2705 Data available",
+    "\u26a0\ufe0f Assumed from related spp.",
+    "\u274c No GoM registry data",
+    "\u2705 Available, not yet used",
+    "\u26a0\ufe0f Feasible as scenario analysis"
+  ),
+  `In Analysis?` = c(
+    "Yes (Phase 3)",
+    "Yes (Litz 2022)",
+    "Yes (2023 AIS)",
+    "Yes (S/M/L/XL)",
+    "No",
+    "No (assumes 1.0)",
+    "No",
+    "No (assumes 0.0)",
+    "No",
+    "No",
+    "No",
+    "No (annual avg)",
+    "Yes (below)"
+  ),
+  Rationale = c(
+    "Garrison GLM; species = 'Not Humpback' appropriate for Rice's whale",
+    "Litz et al. (2022) monthly hex grid; newer Garrison et al. (2024) SDM also exists",
+    "2023 Benioff AIS; cell-aggregated dist_km, hours, speed per cell per day",
+    "~90% of vessel traffic km have known length_m; S/M/L/XL per Garrison thresholds",
+    "Draft derivable from size class using Garrison defaults (S/M/L: 5 m, XL: 15 m)",
+    "2 tagged Rice's whales (Kok et al. 2023); 7 more tagged in 2024 (data pending)",
+    "Requires individual vessel track geometry; current data is cell-aggregated",
+    "McKenna et al. (2015) blue whale parameters not transferable to Rice's whale",
+    "GEBCO 2023 bathymetry available; critical habitat is 100-400 m depth",
+    "Blondin uses 3.0 m for NARW (Moore et al. 2005); reasonable for Rice's whale",
+    "Correction ~3.5x for vessels <65 ft; most critical habitat traffic is large commercial",
+    "Monthly whale densities and ship dates in database; higher computational cost",
+    "Kok et al. (2023) shows strong diel vertical migration; high management relevance"
+  )
+)
+
+kable(param_eval)
+```
+
+### 4.2 Parameter Details
+
+#### a. P(lethality | speed, vessel_size) — Implemented
+
+The @garrisonLethalityCurveGLM2025 GLM (implemented in Phase 3) estimates the probability that a vessel strike is lethal as a function of vessel speed and size class. The model was fit on North Atlantic right whale (NARW) and other large whale strike data — not Rice's whale specifically. Rice's whale is modeled as `spe.HB = "Not Humpback"`, which is appropriate given it is a balaenopterid, not a humpback.
+
+**Caveat:** The lethality curve may not perfectly represent Rice's whale biomechanics, but no species-specific data exist to fit an alternative.
+
+#### b. Whale density (N_w) — Implemented
+
+The @litzCetaceanSeaTurtle2022 monthly hexagonal grid model provides the best available spatial abundance estimates for Rice's whale. Our analysis uses the annual average (month_int = 0), though monthly values are also in the database.
+
+**Caveat:** The model is based on 2021 survey data. @garrisonUpdatedSpeciesDistribution2024 have since developed an updated species distribution model that could be incorporated in future analyses.
+
+#### c. Vessel traffic (AIS) — Implemented
+
+We use 2023 AIS data from the Benioff Ocean Science Laboratory, aggregated to 0.1° cells with daily sums of distance traveled (km), hours, and average speed per MMSI per cell.
+
+**Caveat:** Cell-aggregated data does not capture individual vessel transit geometry, which the full Blondin encounter model requires.
+
+#### d. Vessel size classification — Implemented
+
+Vessels are classified as S/M/L/XL based on `ship.length_m` using the @garrisonLethalityCurveGLM2025 thresholds. Approximately 90% of vessel traffic (by km) comes from vessels with known length. Vessels with missing length default to class "L".
+
+#### e. Vessel draft and strike zone — Feasible to estimate
+
+Vessel draft is not directly recorded in our database but the SEFSC `Step1_RiskModel.R` (lines 86–91) defines depth limits (`depth.lim`) by vessel size class:
+
+- **M/L vessels:** `depth.lim = 5` m
+- **XL vessels:** `depth.lim = 15` m (hull draft; `PropSuctDepth` is commented out in the code)
+
+This means XL vessels have a strike zone 3× deeper than M/L vessels, making vessel size class analytically important. The code also includes a commented-out propeller suction depth (`PropSuctDepth = 1 × mean.draft`) that would extend the XL danger zone to ~30 m, but this is not active in the current model.
+
+**Caveat:** Actual draft varies by vessel loading and type; these are average defaults.
+
+#### f. P(whale at strike depth) — Very limited data
+
+This parameter requires tag-derived dive profiles showing time-at-depth. For NARW, @blondinVesselStrikeMortality2025 used data from 146 depth-recording tags across 4 regions. For Rice's whale, @kokDiveBehaviorRicesWhale2023 presents dive profiles from two tagged individuals — Milky Way (2015) and Edna (2018) — both showing strong diel vertical migration (shallow at night, deep 200–270 m by day).
+
+NMFS tagged 7 additional Rice's whales during a 2024 research cruise, but those data are not yet publicly available. Our current analysis implicitly assumes P(surface) = 1.0, which overstates risk.
+
+**Caveat:** n = 2 whales; any population-level estimate carries substantial uncertainty. The diel scenario analysis (Section 4.3) uses digitized values from both whales to explore sensitivity to this parameter.
+
+#### g. Encounter rate (λ) — Not feasible with current data
+
+The Blondin 2D encounter rate model requires individual vessel transit time through each cell (track-level geometry). Our data format provides cell-aggregated daily sums per MMSI per cell, which lacks the spatial resolution for true encounter probability calculations.
+
+**Rationale:** Using `whale_density × dist_km` as a co-occurrence proxy is reasonable for relative risk comparison across areas, even though it does not capture true encounter mechanics.
+
+#### h. P(avoidance) — No Rice's whale behavioral data
+
+The avoidance probability is based on @mckennaSimultaneousTrackingBlue2015 blue whale vertical avoidance behavior, requiring parameters for whale descent rate, reaction distance, and starting depth — none of which are available for Rice's whale.
+
+Blondin's NARW values range from 0.81–2.0 m/s descent rate and 10–1200 m reaction distance. Their sensitivity analysis showed that **P(avoidance) is the largest single source of model uncertainty**: assuming zero avoidance vs. full avoidance changes mortality estimates by orders of magnitude.
+
+**Caveat:** Our analysis implicitly assumes P(avoidance) = 0 (no avoidance), which provides an upper-bound risk estimate. Using NARW behavioral parameters for Rice's whale would introduce unknown directional bias.
+
+#### i. Bathymetry (bottom depth) — Data available
+
+GEBCO 2023 bathymetry data exists in the project (`data/raw/depth/gebco_2023_*.tif`). In shallow waters where bottom depth < strike zone + whale height, vertical avoidance is physically impossible. For XL vessels (strike zone = 15 m + 3 m whale height = 18 m), areas shallower than 18 m represent "unavoidable strike zones."
+
+**Caveat:** Most Rice's whale critical habitat is 100–400 m deep, so shallow-water unavoidable zones are less relevant than for coastal NARW populations.
+
+#### j. Whale height — Assumed from related species
+
+@blondinVesselStrikeMortality2025 uses 3.0 m for NARW based on @mooreMorphometryGrossMorphology2005. Rice's whale is a similar-sized baleen whale, so 3 m is a reasonable assumption. This parameter is used in the avoidance calculation: a whale needs the strike zone depth plus its own body height of water column to descend clear of the vessel.
+
+#### k. Small vessel AIS correction factor — No GoM registry data
+
+@blondinVesselStrikeMortality2025 apply an approximately 3.5× correction factor for vessels < 65 ft that are not required to carry AIS transponders. Computing this correction for the Gulf of Mexico would require regional vessel registration data.
+
+**Rationale:** Most traffic through Rice's whale critical habitat is from large commercial vessels that carry AIS, so the undercount primarily affects recreational and small fishing vessel risk estimates.
+
+#### l. Monthly temporal resolution — Data available, not yet used
+
+Both monthly whale densities (month_int 1–12) and vessel traffic dates are available in the database. The current analysis uses the annual average, but monthly analysis could reveal temporal risk hotspots where seasonal whale concentrations coincide with high traffic periods.
+
+**Caveat:** Monthly analysis increases computational cost approximately 12×.
+
+#### m. Diel (day/night) risk scenarios — Feasible as scenario analysis
+
+@kokDiveBehaviorRicesWhale2023 demonstrated that the tagged Rice's whale ("Milky Way") spent significantly more time near the surface at night compared to daytime, consistent with diel vertical migration for foraging. Although time-of-day is not available for individual AIS records, we can compute risk under bounding scenarios to quantify the **diel risk differential** — how much more dangerous nighttime transits are compared to daytime. This approach was also referenced in the revised NRDC statement of work (Jasny, Mar 2025).
+
+### 4.3 Diel Risk Scenario Analysis
+
+Using dive profiles from @kokDiveBehaviorRicesWhale2023 for two tagged Rice's whales — Milky Way (2015) and Edna (2018) — we digitized the cumulative % time at depth from Fig. 5 using [WebPlotDigitizer](https://automeris.io/WebPlotDigitizer). These values represent P(surface): the proportion of time each whale spent at or above a given depth threshold during day vs. night.
+
+```{r}
+#| label: diel-p-surface
+
+# get P(surface) estimates digitized from Kok et al. (2023) Fig. 5
+p_surface <- get_p_surface_riceswhale(verbose = TRUE)
+
+p_surface |>
+  mutate(across(where(is.numeric), \(x) round(x, 2))) |>
+  kable(
+    col.names = c(
+      "Depth (m)", "Vessel Sizes",
+      "M.Way Day", "M.Way Night",
+      "Edna Day", "Edna Night",
+      "Avg Day", "Avg Night", "Method"),
+    caption = "P(surface): cumulative proportion of time at or above depth, from Kok et al. (2023) Fig. 5. Milky Way (2015) and Edna (2018). The 30 m row is extrapolated from the 15-to-20 m per-meter rate.")
+```
+
+For the scenario analysis, we use the **average across both whales** and apply P(surface) values matched to vessel size class per the SEFSC `Step1_RiskModel.R` depth limits:
+
+- **S/M/L vessels** (`depth.lim = 5`): avg P(surface) at the 5 m depth threshold
+- **XL vessels** (`depth.lim = 15`): avg P(surface) at the 15 m depth threshold
+
+```{r}
+#| label: diel-scenario-risk
+
+# extract average P(surface) by depth from digitized table
+# depth limits per SEFSC/VesselStrikeRiskModel Step1_RiskModel.R lines 86-91:
+#   M/L: depth.lim = 5;  XL: depth.lim = 15
+p_5m  <- p_surface |> filter(depth_m ==  5) |> select(avg_day, avg_night)
+p_15m <- p_surface |> filter(depth_m == 15) |> select(avg_day, avg_night)
+
+# assign P(surface) by vessel size and diel period
+p_surface_lookup <- tibble::tibble(
+  vessel_size = c("S", "M", "L", "XL", "S", "M", "L", "XL"),
+  period      = rep(c("day", "night"), each = 4),
+  p_surface   = c(
+    # daytime: S/M/L use 5m threshold, XL uses 15m threshold
+    rep(p_5m$avg_day, 3),  p_15m$avg_day,
+    # nighttime: S/M/L use 5m threshold, XL uses 15m threshold
+    rep(p_5m$avg_night, 3), p_15m$avg_night
+  )
+)
+
+# compute diel-adjusted Garrison risk per area
+# (multiply existing Garrison risk by P(surface) for each scenario)
+garrison_diel <- garrison_risk |>
+  inner_join(area_long, by = "cell_id", relationship = "many-to-many")
+
+# day scenario
+garrison_day <- garrison_diel |>
+  left_join(
+    p_surface_lookup |> filter(period == "day") |> select(-period),
+    by = "vessel_size") |>
+  mutate(
+    risk_day          = garrison_risk * p_surface,
+    risk_day_slowdown = garrison_slowdown_risk * p_surface)
+
+# night scenario
+garrison_night <- garrison_diel |>
+  left_join(
+    p_surface_lookup |> filter(period == "night") |> select(-period),
+    by = "vessel_size") |>
+  mutate(
+    risk_night          = garrison_risk * p_surface,
+    risk_night_slowdown = garrison_slowdown_risk * p_surface)
+
+# summarize by area
+diel_by_area <- garrison_day |>
+  group_by(area_label) |>
+  summarize(
+    garrison_risk = sum(garrison_risk, na.rm = TRUE),
+    risk_day      = sum(risk_day, na.rm = TRUE),
+    .groups       = "drop") |>
+  inner_join(
+    garrison_night |>
+      group_by(area_label) |>
+      summarize(
+        risk_night = sum(risk_night, na.rm = TRUE),
+        .groups    = "drop"),
+    by = "area_label") |>
+  mutate(
+    night_day_ratio = risk_night / risk_day,
+    area_label      = factor(area_label, levels = area_order)) |>
+  arrange(area_label)
+
+diel_by_area |>
+  kable(
+    digits    = c(0, 4, 4, 4, 1),
+    col.names = c(
+      "Area", "Garrison Risk (P=1)",
+      "Day Scenario", "Night Scenario", "Night/Day Ratio"),
+    format.args = list(big.mark = ","),
+    caption = "Diel risk scenarios: Garrison risk scaled by P(surface) from Kok et al. (2023).")
+```
+
+```{r}
+#| label: diel-slowdown-comparison
+
+# show day vs night with slowdown
+diel_slowdown <- garrison_day |>
+  group_by(area_label) |>
+  summarize(
+    risk_day          = sum(risk_day, na.rm = TRUE),
+    risk_day_slow     = sum(risk_day_slowdown, na.rm = TRUE),
+    .groups           = "drop") |>
+  inner_join(
+    garrison_night |>
+      group_by(area_label) |>
+      summarize(
+        risk_night      = sum(risk_night, na.rm = TRUE),
+        risk_night_slow = sum(risk_night_slowdown, na.rm = TRUE),
+        .groups         = "drop"),
+    by = "area_label") |>
+  mutate(
+    day_reduction_pct   = (risk_day - risk_day_slow) / risk_day * 100,
+    night_reduction_pct = (risk_night - risk_night_slow) / risk_night * 100,
+    area_label          = factor(area_label, levels = area_order)) |>
+  arrange(area_label)
+
+diel_slowdown |>
+  select(area_label, risk_day, risk_day_slow, day_reduction_pct,
+         risk_night, risk_night_slow, night_reduction_pct) |>
+  kable(
+    digits    = c(0, 4, 4, 1, 4, 4, 1),
+    col.names = c(
+      "Area",
+      "Day Risk", "Day Slowdown", "Day Reduct. %",
+      "Night Risk", "Night Slowdown", "Night Reduct. %"),
+    format.args = list(big.mark = ","),
+    caption = "Slowdown risk reduction under day vs. night scenarios.")
+```
+
+::: {.callout-warning}
+## Caveats for Diel Scenario Analysis
+
+- **n = 2 whales:** P(surface) values are digitized from @kokDiveBehaviorRicesWhale2023 Fig. 5 for Milky Way (2015) and Edna (2018), then averaged. Population-level dive behavior may differ from these two individuals.
+- **Digitization method:** Cumulative % time curves were extracted using [WebPlotDigitizer](https://automeris.io/WebPlotDigitizer). The 30 m depth row is extrapolated from the 15-to-20 m per-meter rate (Fig. 5 only extends to 20 m).
+- **Day/night traffic split unknown:** We apply P(surface) uniformly to all traffic. In reality, the proportion of vessel transits occurring during day vs. night varies by area and vessel type. General maritime patterns suggest most commercial traffic operates around the clock, but recreational traffic concentrates during daylight hours.
+- **Assumed depth thresholds:** The strike zone depths (5 m for S/M/L, 15 m for XL) follow the SEFSC `Step1_RiskModel.R` depth limits and may not exactly represent the hazardous zone for all vessel configurations.
+- **Conservative framing:** The night/day ratio quantifies how much *more* risk nighttime transits pose due to whale surfacing behavior. This has direct management relevance for potential nighttime speed restrictions or routing measures, even without precise vessel-level time-of-day data.
+- **Additional tags pending:** NMFS tagged 7 Rice's whales in 2024; those dive profiles, when available, will substantially improve P(surface) estimates and reduce the uncertainty inherent in n = 2.
+:::
+
 ## Deliverable Maps
 
 ### D1a: Rice's Whale Densities (Annual Average)
 
-Map of annual average whale density (n = number of individuals per cell) from Litz et al. (2022).
+Map of annual average whale density (n = number of individuals per cell) from @litzCetaceanSeaTurtle2022.
 
 ```{r}
 #| label: map-whale-density-annual
-#| fig-cap: "Annual average Rice's whale density from Litz et al. (2022) model. Values represent number of individuals per 0.1° cell."
+#| fig-cap: "Annual average Rice's whale density from @litzCetaceanSeaTurtle2022 model. Values represent number of individuals per 0.1° cell."
 
 # get annual average whale density raster
 r_whale_annual <- get_whale_raster(
@@ -883,7 +1198,7 @@ Map of speed-weighted ship-strike risk per cell (whale density × traffic × Con
 
 ```{r}
 #| label: map-risk
-#| fig-cap: "Speed-weighted ship-strike risk for Rice's whale. Risk = whale density × vessel km × Conn/Silber (2013) speed factor."
+#| fig-cap: "Speed-weighted ship-strike risk for Rice's whale. Risk = whale density × vessel km × @connVesselSpeedRestrictions2013 speed factor."
 
 # aggregate risk to per-cell totals (speed-weighted)
 risk_per_cell <- risk_data |>
@@ -952,7 +1267,7 @@ risk_by_area |>
 
 ### D4: Risk by Area (Speed-Weighted)
 
-Speed-weighted risk using Conn & Silber (2013) factors.
+Speed-weighted risk using @connVesselSpeedRestrictions2013 factors.
 
 ```{r}
 #| label: tbl-risk-weighted
@@ -1038,12 +1353,5 @@ DBI::dbDisconnect(con, shutdown = TRUE)
 
 ## References
 
-- Best (unpub.) - Previous ship-strike risk analysis for Rice's whale
-- Benioff Ocean Science Laboratory (unpub.) - 2023 AIS analysis
-- Blondin, H., et al. (2025). Vessel strike mortality model framework for large whales. In review.
-- Conn, P.B. & Silber, G.K. (2013). Vessel speed restrictions reduce risk of collision-related mortality for North Atlantic right whales. *Ecosphere* 4(4):43.
-- Garrison, L.P., et al. (2025). Lethality curve GLM for vessel strikes on large whales. [SEFSC/VesselStrikeRiskModel](https://github.com/SEFSC/VesselStrikeRiskModel).
-- Kok, A.C.M., et al. (2023). Dive behavior of Rice's whale from a single satellite tag. *Marine Mammal Science* 39(4):1264-1274.
-- Litz, J.A., et al. (2022). Rice's whale (*Balaenoptera ricei*) spatial distribution, abundance, and status. *Marine Mammal Science* 38:1430-1451.
-- NMFS (2020). Endangered Species Act biological opinion on the federally regulated oil and gas program activities in the Gulf of Mexico.
-- NMFS (2023). Proposed rule to designate critical habitat for Rice's whale. 88 FR 47453.
+::: {#refs}
+:::
